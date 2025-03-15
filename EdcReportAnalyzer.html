@@ -1,0 +1,91 @@
+<!doctype html>
+<html>
+    <head>
+        <script type="module" src="EdcReportAnalyzer.js"></script>
+        <link rel="stylesheet" href="EdcReportAnalyzer.css" />
+
+        <title>Analyze EDC CSV Reports</title>
+    </head>
+
+    <body>
+        <h1>EDC Report Analyzer</h1>
+        <div>
+            <div>
+                <input type="file" id="uploadCsv" name="Select CSV (Standard View)..." accept="text/csv" />
+            </div>
+            <div>
+                <label for="minFilter">Filter by minimum sharing:</label>
+                <span id="minFilter"></span>
+                <input
+                    name="minFilter"
+                    type="range"
+                    min="0"
+                    max="100"
+                    value="99"
+                    id="filterSlider"
+                    style="direction: rtl"
+                />
+                <span id="maxFilter"></span>
+                Current threshold: <span id="thresholdFilter"></span>
+            </div>
+            <div><label for="hideEans">Hide EANs</label><input type="checkbox" id="hideEans" /></div>
+        </div>
+
+        <h1>Input Data</h1>
+        <table id="csvMeta">
+            <tbody>
+                <tr>
+                    <th>File Name:</th>
+                    <td id="filename"></td>
+                </tr>
+                <tr>
+                    <th>Interval from:</th>
+                    <td id="intervalFrom"></td>
+                </tr>
+                <tr>
+                    <th>Interval to:</th>
+                    <td id="intervalTo"></td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h1>Summary</h1>
+        <table id="csv">
+            <thead>
+                <tr>
+                    <th></th>
+                    <th class="distributionHeader">Distribution</th>
+                    <td class="split"></td>
+                    <th class="consumerHeader">Consumer</th>
+                </tr>
+                <tr class="csvHeaderRow"></tr>
+            </thead>
+            <tbody id="csvBody"></tbody>
+        </table>
+        <div>
+            "Missed" is an estimation of how much sharing was missed due to wrongly set allocation keys. If
+            the distribution EANs still have some kWh-s left after sharing, and some consumer EAN(s) did not
+            achieve 0 kWh-s, it means there was power left for sharing which was not allocated due to wrong
+            allocation keys.
+        </div>
+        <div>
+            Unfortunately this metric is in no way perfect, because the data are provided with only 0 decimal
+            places and the rounding errors accumulate. Often there is 0.01 kWh left in distribution EAN and
+            0.01 kWh left in a consumer EAN and we have no way of knowing what really happened.
+        </div>
+
+        <h1>Intervals</h1>
+        <table id="intervals">
+            <thead>
+                <tr>
+                    <th></th>
+                    <th class="distributionHeader">Distribution</th>
+                    <td class="split"></td>
+                    <th class="consumerHeader">Consumer</th>
+                </tr>
+                <tr class="csvHeaderRow"></tr>
+            </thead>
+            <tbody id="csvBody"></tbody>
+        </table>
+    </body>
+</html>

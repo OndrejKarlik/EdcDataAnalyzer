@@ -1,0 +1,13 @@
+{
+    "compilerOptions": {
+        "target"                       : "es2022"   /* JavaScript target (lower values mean some new features get replaced for compatibility) */,
+        "module"                       : "nodenext",
+
+        "noEmitOnError"                    : true,
+        "strict"                           : true,
+        "forceConsistentCasingInFileNames" : true,
+
+        "inlineSourceMap" : true,
+        "inlineSources"   : true
+    }
+}
