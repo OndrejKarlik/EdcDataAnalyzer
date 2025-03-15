@@ -2,6 +2,9 @@
 
 Analyzes CSV report from EDC-CZ and makes a pretty table.
 
+![Screenshot](doc/promo.png)
+
+
 # Building
 
 Requires node.js. Build with `npm run build`.
