@@ -1,5 +1,8 @@
+/* eslint-disable @typescript-eslint/non-nullable-type-assertion-style */
+/* eslint-disable @typescript-eslint/no-unsafe-type-assertion */
 /* eslint-disable no-lone-blocks */
-// TODO: multiple distribution EANs
+
+// TODO: test multiple distribution EANs
 
 type Rgb = [number, number, number];
 
@@ -15,6 +18,17 @@ function assert(condition: boolean, ...loggingArgs: unknown[]): asserts conditio
     }
 }
 
+const warningDom = document.getElementById("warnings") as HTMLDivElement;
+
+let gDisplayUnit = "kWh";
+
+function logWarning(warning: string): void {
+    warningDom.style.display = "block";
+    const dom = document.createElement("li");
+    dom.innerText = warning;
+    warningDom.appendChild(dom);
+}
+
 function parseKwh(input: string): number {
     if (input.length === 0) {
         return 0.0;
@@ -25,12 +39,16 @@ function parseKwh(input: string): number {
     return result;
 }
 
-function printKWh(input: number): string {
-    return `${input.toFixed(2)}&nbsp;kWh`;
+function printKWh(input: number, alwaysKwh = false): string {
+    if (gDisplayUnit === "kW" && !alwaysKwh) {
+        return `${(input * 4).toFixed(2)}&nbsp;kW`;
+    } else {
+        return `${input.toFixed(2)}&nbsp;kWh`;
+    }
 }
 
 function getDate(explodedLine: string[]): Date {
-    assert(explodedLine.length > 3, `[${explodedLine.join(";")}]`);
+    assert(explodedLine.length > 3, `Cannot extract date - whole line is: "${explodedLine.join(";")}"`);
     const [day, month, year] = explodedLine[0].split(".");
     const [hour, minute] = explodedLine[1].split(":");
     return new Date(
@@ -79,10 +97,11 @@ class Csv {
 
     intervals: Interval[] = [];
 
-    constructor(filename: string, dateFrom: Date, dateTo: Date) {
+    constructor(filename: string, intervals: Interval[]) {
         this.filename = filename;
-        this.dateFrom = dateFrom;
-        this.dateTo = dateTo;
+        this.intervals = intervals;
+        this.dateFrom = intervals[0].start;
+        this.dateTo = last(intervals).start;
     }
 }
 
@@ -99,6 +118,7 @@ class Ean {
     }
 }
 
+// eslint-disable-next-line complexity
 function parseCsv(csv: string, filename: string): Csv {
     const lines = csv.split("\n");
     assert(lines.length > 0, "CSV file is empty");
@@ -111,8 +131,8 @@ function parseCsv(csv: string, filename: string): Csv {
     const consumerEans: Ean[] = [];
 
     for (let i = 3; i < header.length; i += 2) {
-        const before = header[i];
-        const after = header[i + 1];
+        const before = header[i].trim();
+        const after = header[i + 1].trim();
         assert(before.substring(2) === after.substring(3), "Mismatched IN- and OUT-", before, after);
 
         const isDistribution = before.endsWith("-D");
@@ -126,33 +146,38 @@ function parseCsv(csv: string, filename: string): Csv {
         assert(before.startsWith("IN-") && after.startsWith("OUT-"), before, after);
     }
 
-    const result = new Csv(
-        filename,
-        getDate(lines[1].split(";")),
-        getDate(lines[lines.length - 2].split(";")),
-    );
-
     // Maps from time to missing sharing for that time slot
     const missedSharingDueToAllocationTimeSlots = new Map<number, number>();
+    const intervals = [] as Interval[];
 
     for (let i = 1; i < lines.length; ++i) {
-        if (lines[i].length === 0) {
+        if (lines[i].trim().length === 0) {
             continue;
         }
-
         const explodedLine = lines[i].split(";");
-        assert(explodedLine.length === 4 + (consumerEans.length + distributorEans.length) * 2);
+
+        const expectedLength = 3 + (consumerEans.length + distributorEans.length) * 2;
+        // In some reports there is an empty field at the end of the line
+        assert(
+            explodedLine.length === expectedLength ||
+                (explodedLine.length === expectedLength + 1 && last(explodedLine) === ""),
+            `Wrong number of items: ${explodedLine.length}, expected: ${expectedLength}, line number: ${i}`,
+        );
         const date = getDate(explodedLine);
 
         const distributed: Measurement[] = [];
         const consumed: Measurement[] = [];
 
-        assert(last(explodedLine) === ""); // The data lines end with ";" for some reason
-
         for (const ean of distributorEans) {
             const before = parseKwh(explodedLine[ean.csvIndex]);
             const after = parseKwh(explodedLine[ean.csvIndex + 1]);
-            assert(before >= 0 && after >= 0, `Distribution EAN is consuming power? Line ${i}`);
+            if (before < 0 || after < 0) {
+                logWarning(
+                    `Input data is inconsistent! Only "monthly report" is guaranteed to be correct, prefer using that.
+                    Distribution EAN ${ean.name} is consuming ${before}/${after} kWh power on ${printDate(date)}`,
+                );
+            }
+
             ean.originalBalance += before;
             ean.adjustedBalance += after;
             ean.maximumOriginal = Math.max(ean.maximumOriginal, before);
@@ -161,7 +186,12 @@ function parseCsv(csv: string, filename: string): Csv {
         for (const ean of consumerEans) {
             const before = -parseKwh(explodedLine[ean.csvIndex]);
             const after = -parseKwh(explodedLine[ean.csvIndex + 1]);
-            assert(before >= 0 && after >= 0, `Consumer EAN is distributing power? Line ${i}`);
+            if (before < 0 || after < 0) {
+                logWarning(
+                    `Input data is inconsistent! Only "monthly report" is guaranteed to be correct, prefer using that.
+                    Consumer EAN ${ean.name} is distributing ${before}/${after} kWh power on ${printDate(date)}`,
+                );
+            }
             ean.originalBalance += before;
             ean.adjustedBalance += after;
             ean.maximumOriginal = Math.max(ean.maximumOriginal, before);
@@ -189,18 +219,22 @@ function parseCsv(csv: string, filename: string): Csv {
         }
         const sumSharedProduced = distributed.reduce((acc, val) => acc + (val.before - val.after), 0);
         const sumSharedConsumed = consumed.reduce((acc, val) => acc + (val.before - val.after), 0);
-        assert(
-            Math.abs(sumSharedProduced - sumSharedConsumed) < 0.0001,
-            `Energy shared from producers does not match energy shared to consumers!\nProduced: ${sumSharedProduced}\nConsumed: ${sumSharedConsumed}\nLine (${i}): ${lines[i]}`,
-        );
+        if (Math.abs(sumSharedProduced - sumSharedConsumed) > 0.0001) {
+            logWarning(
+                `Input data is inconsistent! Only "monthly report" is guaranteed to be correct, prefer using that.
+                Energy shared from producers does not match energy shared to consumers on ${printDate(date)}! \nProduced: ${sumSharedProduced}\n Consumed: ${sumSharedConsumed}`,
+            );
+        }
 
-        result.intervals.push({
+        intervals.push({
             start: date,
             sumSharing: distributed.reduce((acc, val) => acc + (val.before - val.after), 0),
             distributions: distributed,
             consumers: consumed,
         });
     }
+
+    const result = new Csv(filename, intervals);
 
     result.distributionEans = distributorEans;
     result.consumerEans = consumerEans;
@@ -217,13 +251,15 @@ function colorizeRange(query: string, rgb: Rgb): void {
     const collection = document.querySelectorAll(query);
     // console.log(query);
     // console.log(collection);
-    let minimum = Infinity;
+    // let minimum = Infinity;
+    let minimum = 0; // It works better with filtering if minimum is always 0
     let maximum = 0;
     for (const i of collection) {
         const value = parseFloat((i as HTMLElement).innerText);
         maximum = Math.max(maximum, value);
         minimum = Math.min(minimum, value);
     }
+    // console.log(minimum, maximum);
     assert(!isNaN(maximum));
     // console.log("Colorizing with maximum", maximum);
     for (const i of collection) {
@@ -315,10 +351,10 @@ function displayCsv(csv: Csv, filterValue: number, hideEans: boolean): void {
             colorizeRange(`table#csv tr.${id} td.distribution`, backgroundColor);
         };
 
-        makeRow("Original [kWh]:", GRAY, (ean) => printKWh(ean.originalBalance));
-        makeRow("Adjusted [kWh]:", GRAY, (ean) => printKWh(ean.adjustedBalance));
-        makeRow("Shared [kWh]:", GREEN, (ean) => printKWh(ean.originalBalance - ean.adjustedBalance));
-        makeRow("Missed [kWh]:", RED, (ean) => printKWh(ean.missedDueToAllocation));
+        makeRow("Original [kWh]:", GRAY, (ean) => printKWh(ean.originalBalance, true));
+        makeRow("Adjusted [kWh]:", GRAY, (ean) => printKWh(ean.adjustedBalance, true));
+        makeRow("Shared [kWh]:", GREEN, (ean) => printKWh(ean.originalBalance - ean.adjustedBalance, true));
+        makeRow("Missed [kWh]:", RED, (ean) => printKWh(ean.missedDueToAllocation, true));
     }
 
     let minSharingDistributor = Infinity;
@@ -412,7 +448,9 @@ function displayCsv(csv: Csv, filterValue: number, hideEans: boolean): void {
 
     thresholdFilter.innerHTML = printKWh(maxSharingInterval * filterValue);
 
+    // console.log("Colorizing table#intervals td.consumer");
     colorizeRange("table#intervals td.consumer", GREEN);
+    // console.log("Colorizing table#intervals td.distribution");
     colorizeRange("table#intervals td.distribution", GREEN);
 
     console.log("displayCsv took", performance.now() - startTime, "ms");
@@ -420,7 +458,6 @@ function displayCsv(csv: Csv, filterValue: number, hideEans: boolean): void {
 
 let gCsv: Csv | null = null;
 
-// eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
 const fileInput = document.getElementById("uploadCsv") as HTMLInputElement;
 const filterSlider = document.getElementById("filterSlider") as HTMLInputElement;
 
@@ -438,10 +475,11 @@ function getHideEans(): boolean {
 }
 fileInput.addEventListener("change", () => {
     if (fileInput.files?.length === 1) {
+        warningDom.style.display = "none";
+        warningDom.innerHTML = "";
         thresholdFilter.value = "0";
         const reader = new FileReader();
         reader.addEventListener("loadend", () => {
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
             gCsv = parseCsv(reader.result as string, fileInput.files![0].name);
             refreshView();
         });
@@ -454,7 +492,14 @@ filterSlider.addEventListener("input", () => {
 document.getElementById("hideEans")!.addEventListener("change", () => {
     refreshView();
 });
+document.querySelectorAll('input[name="unit"]').forEach((button) => {
+    button.addEventListener("change", (e) => {
+        gDisplayUnit = (e.target as HTMLInputElement).value;
+        refreshView();
+    });
+});
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function mock(): void {
     // Testing data
     gCsv = parseCsv(
