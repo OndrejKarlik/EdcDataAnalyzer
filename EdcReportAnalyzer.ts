@@ -132,10 +132,14 @@ class Ean {
 
 // eslint-disable-next-line complexity
 function parseCsv(csv: string, filename: string): Csv {
+    csv = csv.replaceAll("\r\n", "\n");
     const lines = csv.split("\n");
     assert(lines.length > 0, "CSV file is empty");
     const header = lines[0].split(";");
-    assert(header.length > 3, "CSV file has invalid header");
+    assert(
+        header.length > 3,
+        `CSV file has invalid header - less than 3 elements. Is there an extra empty line? The entire line is "${lines[0]}"`,
+    );
     assert(header[0] === "Datum" && header[1] === "Cas od" && header[2] === "Cas do");
     assert(header.length % 2 === 1);
 
@@ -173,7 +177,7 @@ function parseCsv(csv: string, filename: string): Csv {
         assert(
             explodedLine.length === expectedLength ||
                 (explodedLine.length === expectedLength + 1 && last(explodedLine) === ""),
-            `Wrong number of items: ${explodedLine.length}, expected: ${expectedLength}, line number: ${i}`,
+            `Wrong number of items: ${explodedLine.length}, expected: ${expectedLength}, line number: ${i}. Last item on line is "${last(explodedLine)}"`,
         );
         const date = getDate(explodedLine);
 
@@ -530,7 +534,7 @@ document.querySelectorAll('input[name="unit"]').forEach((button) => {
 });
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-function mock(): void {
+export function mock(): void {
     // Testing data
     gCsv = parseCsv(
         `Datum;Cas od;Cas do;IN-859182400000000001-D;OUT-859182400000000001-D;IN-859182400000000002-O;OUT-859182400000000002-O;IN-859182400000000003-O;OUT-859182400000000003-O;IN-859182400000000004-O;OUT-859182400000000004-O;IN-859182400000000005-O;OUT-859182400000000005-O;IN-859182400000000006-O;OUT-859182400000000006-O;IN-859182400000000007-O;OUT-859182400000000007-O
