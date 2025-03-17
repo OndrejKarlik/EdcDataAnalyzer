@@ -50,7 +50,6 @@ table#csvMeta {
 }
 
 table {
-    word-break: break-word;
     width: 100%;
 }
 
@@ -86,4 +85,14 @@ ul#warnings {
     color: white;
     overflow-y: scroll;
     font-size: 80%;
+}
+
+th.distribution,
+th.consumer {
+    word-break: break-word;
+}
+
+tr.csvHeaderRow input {
+    width: 100%;
+    min-width: 0;
 }

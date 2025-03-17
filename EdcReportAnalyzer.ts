@@ -19,8 +19,20 @@ function assert(condition: boolean, ...loggingArgs: unknown[]): asserts conditio
 }
 
 const warningDom = document.getElementById("warnings") as HTMLDivElement;
+const fileDom = document.getElementById("uploadCsv") as HTMLInputElement;
+const filterDom = document.getElementById("filterSlider") as HTMLInputElement;
 
-let gDisplayUnit = "kWh";
+interface Settings {
+    displayUnit: "kWh" | "kW";
+    hideEans: boolean;
+    filterValue: number;
+}
+
+const gSettings: Settings = {
+    displayUnit: "kWh",
+    hideEans: false,
+    filterValue: 0,
+};
 
 function logWarning(warning: string): void {
     warningDom.style.display = "block";
@@ -40,7 +52,7 @@ function parseKwh(input: string): number {
 }
 
 function printKWh(input: number, alwaysKwh = false): string {
-    if (gDisplayUnit === "kW" && !alwaysKwh) {
+    if (gSettings.displayUnit === "kW" && !alwaysKwh) {
         return `${(input * 4).toFixed(2)}&nbsp;kW`;
     } else {
         return `${input.toFixed(2)}&nbsp;kWh`;
@@ -60,10 +72,10 @@ function getDate(explodedLine: string[]): Date {
     );
 }
 
-function printEan(input: string, hide: boolean): string {
+function printEan(input: string): string {
     assert(input.length === 18);
     // input = input.replace("859182400", "…"); // Does not look good...
-    if (hide) {
+    if (gSettings.hideEans) {
         input = `859182400xxxxxxx${input.substring(16)}`;
         assert(input.length === 18);
     }
@@ -273,7 +285,14 @@ function colorizeRange(query: string, rgb: Rgb): void {
     }
 }
 
-function setupHeader(table: HTMLTableElement, csv: Csv, hideEans: boolean): void {
+function recallEanAlias(ean: Ean): string {
+    return localStorage.getItem(`EAN_alias_${ean.name}`) ?? "";
+}
+function saveEanAlias(ean: Ean, alias: string): void {
+    localStorage.setItem(`EAN_alias_${ean.name}`, alias);
+}
+
+function setupHeader(table: HTMLTableElement, csv: Csv, editableNames: boolean): void {
     (table.querySelector("th.distributionHeader") as HTMLTableCellElement).colSpan =
         csv.distributionEans.length;
     (table.querySelector("th.consumerHeader") as HTMLTableCellElement).colSpan = csv.consumerEans.length;
@@ -281,18 +300,35 @@ function setupHeader(table: HTMLTableElement, csv: Csv, hideEans: boolean): void
     const theader = table.querySelector("tr.csvHeaderRow") as HTMLTableRowElement;
     assert(theader !== null);
     theader.innerHTML = "<th>EAN</th>";
-    for (const ean of csv.distributionEans) {
+
+    const createCell = (domClass: string, ean: Ean): void => {
         const th = document.createElement("th");
-        th.classList.add("distribution");
-        th.innerText = printEan(ean.name, hideEans);
+        th.classList.add(domClass);
+        th.innerText = printEan(ean.name);
+        if (editableNames) {
+            const input = document.createElement("input");
+            input.type = "text";
+            input.value = recallEanAlias(ean);
+            input.addEventListener("change", () => {
+                saveEanAlias(ean, input.value);
+                refreshView();
+            });
+            th.appendChild(input);
+        } else {
+            const recalled = recallEanAlias(ean);
+            if (recalled.length > 0) {
+                th.innerHTML += `<br>(${recalled})`;
+            }
+        }
         theader.appendChild(th);
+    };
+
+    for (const ean of csv.distributionEans) {
+        createCell("distribution", ean);
     }
     theader.insertCell().classList.add("split");
     for (const ean of csv.consumerEans) {
-        const th = document.createElement("th");
-        th.classList.add("consumer");
-        th.innerText = printEan(ean.name, hideEans);
-        theader.appendChild(th);
+        createCell("consumer", ean);
     }
 }
 
@@ -303,12 +339,9 @@ function printDate(date: Date): string {
     return `${printOnlyDate(date)} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
-const thresholdFilter = document.getElementById("thresholdFilter") as HTMLInputElement;
-
-function displayCsv(csv: Csv, filterValue: number, hideEans: boolean): void {
+function displayCsv(csv: Csv): void {
     const startTime = performance.now();
-    console.log("DisplayCsv filterValue", filterValue);
-    assert(filterValue >= 0 && filterValue <= 1);
+    assert(gSettings.filterValue >= 0 && gSettings.filterValue <= 1);
     const GREEN = [14, 177, 14] as Rgb;
     const RED = [255, 35, 35] as Rgb;
     const GRAY = [150, 150, 150] as Rgb;
@@ -322,7 +355,7 @@ function displayCsv(csv: Csv, filterValue: number, hideEans: boolean): void {
 
     {
         // Summary
-        setupHeader(document.getElementById("csv") as HTMLTableElement, csv, hideEans);
+        setupHeader(document.getElementById("csv") as HTMLTableElement, csv, true);
         const tbody = document.getElementById("csvBody");
         assert(tbody !== null);
         tbody.innerHTML = "";
@@ -380,7 +413,7 @@ function displayCsv(csv: Csv, filterValue: number, hideEans: boolean): void {
     const intervalBody = intervalTable!.querySelector("tbody")!;
     intervalBody.innerHTML = "";
     // Intervals
-    setupHeader(document.getElementById("intervals") as HTMLTableElement, csv, hideEans);
+    setupHeader(document.getElementById("intervals") as HTMLTableElement, csv, false);
 
     let lastDisplayed: null | Interval = null;
 
@@ -406,7 +439,7 @@ function displayCsv(csv: Csv, filterValue: number, hideEans: boolean): void {
             }
         }
 
-        if (interval.sumSharing < maxSharingInterval * filterValue) {
+        if (interval.sumSharing < maxSharingInterval * gSettings.filterValue) {
             continue;
         }
         lastDisplayed = interval;
@@ -446,7 +479,9 @@ function displayCsv(csv: Csv, filterValue: number, hideEans: boolean): void {
     document.getElementById("minFilter")!.innerHTML = printKWh(minSharingInterval);
     document.getElementById("maxFilter")!.innerHTML = printKWh(maxSharingInterval);
 
-    thresholdFilter.innerHTML = printKWh(maxSharingInterval * filterValue);
+    (document.getElementById("thresholdFilter") as HTMLInputElement).innerHTML = printKWh(
+        maxSharingInterval * gSettings.filterValue,
+    );
 
     // console.log("Colorizing table#intervals td.consumer");
     colorizeRange("table#intervals td.consumer", GREEN);
@@ -458,43 +493,38 @@ function displayCsv(csv: Csv, filterValue: number, hideEans: boolean): void {
 
 let gCsv: Csv | null = null;
 
-const fileInput = document.getElementById("uploadCsv") as HTMLInputElement;
-const filterSlider = document.getElementById("filterSlider") as HTMLInputElement;
-
 function refreshView(): void {
     if (gCsv) {
-        displayCsv(gCsv, getFilterValue(), getHideEans());
+        displayCsv(gCsv);
     }
 }
 
-function getFilterValue(): number {
-    return 1 - parseInt(filterSlider.value, 10) / 100;
-}
-function getHideEans(): boolean {
-    return (document.getElementById("hideEans") as HTMLInputElement).checked;
-}
-fileInput.addEventListener("change", () => {
-    if (fileInput.files?.length === 1) {
+fileDom.addEventListener("change", () => {
+    if (fileDom.files?.length === 1) {
         warningDom.style.display = "none";
         warningDom.innerHTML = "";
-        thresholdFilter.value = "0";
+        filterDom.value = "99";
+        filterDom.dispatchEvent(new Event("input", { bubbles: true }));
         const reader = new FileReader();
         reader.addEventListener("loadend", () => {
-            gCsv = parseCsv(reader.result as string, fileInput.files![0].name);
+            gCsv = parseCsv(reader.result as string, fileDom.files![0].name);
             refreshView();
         });
-        reader.readAsText(fileInput.files[0]); // Read file as text
+        reader.readAsText(fileDom.files[0]); // Read file as text
     }
 });
-filterSlider.addEventListener("input", () => {
+filterDom.addEventListener("input", () => {
+    // console.log("filterDom INPUT");
+    gSettings.filterValue = 1 - parseInt(filterDom.value, 10) / 100;
     refreshView();
 });
 document.getElementById("hideEans")!.addEventListener("change", () => {
+    gSettings.hideEans = (document.getElementById("hideEans") as HTMLInputElement).checked;
     refreshView();
 });
 document.querySelectorAll('input[name="unit"]').forEach((button) => {
     button.addEventListener("change", (e) => {
-        gDisplayUnit = (e.target as HTMLInputElement).value;
+        gSettings.displayUnit = (e.target as HTMLInputElement).value as "kWh" | "kW";
         refreshView();
     });
 });
