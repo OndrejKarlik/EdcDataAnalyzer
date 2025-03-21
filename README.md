@@ -1,6 +1,6 @@
 # EdcDataAnalyzer
 
-Analyzes CSV report from EDC-CZ and makes a pretty table.
+Analyzes CSV report from EDC-CZ and makes a pretty table. **Run it at https://ondrejkarlik.github.io/EdcDataAnalyzer/index.html**
 
 ![Screenshot](doc/promo.png)
 
