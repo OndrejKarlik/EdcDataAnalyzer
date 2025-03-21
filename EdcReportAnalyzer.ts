@@ -13,6 +13,8 @@ function last<T>(container: T[]): T {
 function assert(condition: boolean, ...loggingArgs: unknown[]): asserts condition {
     if (!condition) {
         const errorMsg = `Assert failed: ${loggingArgs.toString()}`;
+        console.error("Assert failed", ...loggingArgs);
+        debugger;
         alert(errorMsg);
         throw new Error(errorMsg);
     }
@@ -36,6 +38,12 @@ const gSettings: Settings = {
 
 function logWarning(warning: string): void {
     warningDom.style.display = "block";
+    if (warningDom.children.length === 0) {
+        const dom = document.createElement("li");
+        dom.innerText = `Input data is inconsistent! Only "monthly report" is guaranteed to be correct, prefer using that.
+                         The script will attempt to fix some errors, but the result is still only approximate. Also not all errors can be caught.`;
+        warningDom.appendChild(dom);
+    }
     const dom = document.createElement("li");
     dom.innerText = warning;
     warningDom.appendChild(dom);
@@ -185,13 +193,21 @@ function parseCsv(csv: string, filename: string): Csv {
         const consumed: Measurement[] = [];
 
         for (const ean of distributorEans) {
-            const before = parseKwh(explodedLine[ean.csvIndex]);
-            const after = parseKwh(explodedLine[ean.csvIndex + 1]);
+            let before = parseKwh(explodedLine[ean.csvIndex]);
+            let after = parseKwh(explodedLine[ean.csvIndex + 1]);
+            if (after > before) {
+                logWarning(
+                    `Distribution EAN ${ean.name} is distributing ${after - before} kWh more AFTER subtracting sharing on ${printDate(date)}.
+                    The report will clip sharing to 0.`,
+                );
+                after = before;
+            }
             if (before < 0 || after < 0) {
                 logWarning(
-                    `Input data is inconsistent! Only "monthly report" is guaranteed to be correct, prefer using that.
-                    Distribution EAN ${ean.name} is consuming ${before}/${after} kWh power on ${printDate(date)}`,
+                    `Distribution EAN ${ean.name} is consuming ${before / after} kWh power on ${printDate(date)}. The report will clip negative values to 0.`,
                 );
+                before = Math.max(0, before);
+                after = Math.max(0, after);
             }
 
             ean.originalBalance += before;
@@ -200,13 +216,21 @@ function parseCsv(csv: string, filename: string): Csv {
             distributed.push({ before, after });
         }
         for (const ean of consumerEans) {
-            const before = -parseKwh(explodedLine[ean.csvIndex]);
-            const after = -parseKwh(explodedLine[ean.csvIndex + 1]);
+            let before = -parseKwh(explodedLine[ean.csvIndex]);
+            let after = -parseKwh(explodedLine[ean.csvIndex + 1]);
+            if (after > before) {
+                logWarning(
+                    `Consumer EAN ${ean.name} is consuming ${after - before} kWh more AFTER subtracting sharing on ${printDate(date)}.
+                    The report will clip sharing to 0.`,
+                );
+                after = before;
+            }
             if (before < 0 || after < 0) {
                 logWarning(
-                    `Input data is inconsistent! Only "monthly report" is guaranteed to be correct, prefer using that.
-                    Consumer EAN ${ean.name} is distributing ${before}/${after} kWh power on ${printDate(date)}`,
+                    `Consumer EAN ${ean.name} is distributing ${before / after} kWh power on ${printDate(date)}. The report will clip negative values to 0.`,
                 );
+                before = Math.max(0, before);
+                after = Math.max(0, after);
             }
             ean.originalBalance += before;
             ean.adjustedBalance += after;
@@ -233,13 +257,38 @@ function parseCsv(csv: string, filename: string): Csv {
                 }
             }
         }
-        const sumSharedProduced = distributed.reduce((acc, val) => acc + (val.before - val.after), 0);
+        const sumSharedDistributed = distributed.reduce((acc, val) => acc + (val.before - val.after), 0);
+        assert(sumSharedDistributed >= 0, sumSharedDistributed, "Line", i);
         const sumSharedConsumed = consumed.reduce((acc, val) => acc + (val.before - val.after), 0);
-        if (Math.abs(sumSharedProduced - sumSharedConsumed) > 0.0001) {
+        assert(sumSharedConsumed >= 0, sumSharedConsumed, "Line", i);
+        if (Math.abs(sumSharedDistributed - sumSharedConsumed) > 0.0001) {
             logWarning(
-                `Input data is inconsistent! Only "monthly report" is guaranteed to be correct, prefer using that.
-                Energy shared from producers does not match energy shared to consumers on ${printDate(date)}! \nProduced: ${sumSharedProduced}\n Consumed: ${sumSharedConsumed}`,
+                `Energy shared from distributors does not match energy shared to consumers on ${printDate(date)}! \nDistributed: ${sumSharedDistributed}\n Consumed: ${sumSharedConsumed}.
+                The report will consider the mismatch not shared.`,
             );
+            if (sumSharedDistributed > sumSharedConsumed) {
+                const fixDistributors = sumSharedConsumed / sumSharedDistributed;
+                console.log("Fixing distributors", fixDistributors);
+                assert(
+                    fixDistributors <= 1 && fixDistributors >= 0 && !isNaN(fixDistributors),
+                    sumSharedConsumed,
+                    sumSharedDistributed,
+                );
+                for (const j of distributed) {
+                    j.after *= fixDistributors;
+                }
+            } else {
+                const fixConsumers = sumSharedDistributed / sumSharedConsumed;
+                console.log("Fixing consumers", fixConsumers);
+                assert(
+                    fixConsumers <= 1 && fixConsumers >= 0 && !isNaN(fixConsumers),
+                    sumSharedDistributed,
+                    sumSharedConsumed,
+                );
+                for (const j of consumed) {
+                    j.after *= fixConsumers;
+                }
+            }
         }
 
         intervals.push({
@@ -276,7 +325,7 @@ function colorizeRange(query: string, rgb: Rgb): void {
         minimum = Math.min(minimum, value);
     }
     // console.log(minimum, maximum);
-    assert(!isNaN(maximum));
+    assert(!isNaN(maximum), `There is a NaN when colorizing query${query}`);
     // console.log("Colorizing with maximum", maximum);
     for (const i of collection) {
         const htmlElement = i as HTMLElement;
@@ -538,37 +587,22 @@ export function mock(): void {
     // Testing data
     gCsv = parseCsv(
         `Datum;Cas od;Cas do;IN-859182400000000001-D;OUT-859182400000000001-D;IN-859182400000000002-O;OUT-859182400000000002-O;IN-859182400000000003-O;OUT-859182400000000003-O;IN-859182400000000004-O;OUT-859182400000000004-O;IN-859182400000000005-O;OUT-859182400000000005-O;IN-859182400000000006-O;OUT-859182400000000006-O;IN-859182400000000007-O;OUT-859182400000000007-O
-01.02.2025;00:00;00:15;0,0;0,0;-0,35;-0,35;-0,07;-0,07;-0,54;-0,54;-0,52;-0,52;-0,02;-0,02;-0,03;-0,03;
-01.02.2025;00:15;00:30;0,0;0,0;-0,59;-0,59;-0,14;-0,14;-0,89;-0,89;-0,54;-0,54;-0,01;-0,01;-0,05;-0,05;
-01.02.2025;00:30;00:45;0,0;0,0;-0,47;-0,47;-0,36;-0,36;-0,72;-0,72;-0,54;-0,54;0,0;0,0;-0,03;-0,03;
-01.02.2025;00:45;01:00;0,0;0,0;-0,03;-0,03;-0,37;-0,37;-0,62;-0,62;-0,52;-0,52;-0,02;-0,02;-0,04;-0,04;
-01.02.2025;01:00;01:15;0,0;0,0;0,0;0,0;-0,38;-0,38;-0,55;-0,55;-0,55;-0,55;-0,01;-0,01;-0,31;-0,31;
-01.02.2025;01:15;01:30;0,0;0,0;-0,01;-0,01;-0,35;-0,35;-0,58;-0,58;-0,53;-0,53;-0,02;-0,02;-0,1;-0,1;
-01.02.2025;01:30;01:45;0,0;0,0;-0,29;-0,29;-0,8;-0,8;-0,66;-0,66;-0,33;-0,33;-0,01;-0,01;-0,04;-0,04;
-01.02.2025;01:45;02:00;0,0;0,0;-0,34;-0,34;-0,31;-0,31;-0,82;-0,82;-0,14;-0,14;-0,01;-0,01;-0,06;-0,06;
-01.02.2025;02:00;02:15;0,0;0,0;-0,2;-0,2;-0,07;-0,07;-0,16;-0,16;-0,15;-0,15;-0,02;-0,02;-0,06;-0,06;
-01.02.2025;02:15;02:30;0,0;0,0;-0,42;-0,42;-0,08;-0,08;-0,11;-0,11;-0,5;-0,5;-0,01;-0,01;-0,03;-0,03;
-01.02.2025;02:30;02:45;0,0;0,0;-0,23;-0,23;-0,07;-0,07;-0,11;-0,11;-0,49;-0,49;-0,01;-0,01;-0,05;-0,05;
-01.02.2025;02:45;03:00;0,0;0,0;0,0;0,0;-0,32;-0,32;-0,12;-0,12;-0,55;-0,55;-0,02;-0,02;-0,03;-0,03;
-01.02.2025;03:00;03:15;0,0;0,0;-0,1;-0,1;-0,38;-0,38;-0,11;-0,11;-0,52;-0,52;0,0;0,0;-0,04;-0,04;
-01.02.2025;03:15;03:30;0,0;0,0;-0,34;-0,34;-0,39;-0,39;-0,43;-0,43;-0,51;-0,51;-0,02;-0,02;-0,03;-0,03;
-01.02.2025;03:30;03:45;0,0;0,0;-0,15;-0,15;-0,32;-0,32;-0,51;-0,51;-0,51;-0,51;-0,01;-0,01;-0,04;-0,04;
-01.02.2025;03:45;04:00;0,0;0,0;-0,03;-0,03;-0,4;-0,4;-0,48;-0,48;-0,5;-0,5;-0,01;-0,01;-0,04;-0,04;
-01.02.2025;04:00;04:15;0,0;0,0;-0,45;-0,45;-0,14;-0,14;-0,72;-0,72;-0,52;-0,52;-0,02;-0,02;-0,07;-0,07;
-01.02.2025;04:15;04:30;0,0;0,0;-0,19;-0,19;-0,07;-0,07;-0,87;-0,87;-0,49;-0,49;0,0;0,0;-0,59;-0,59;
-01.02.2025;04:30;04:45;0,0;0,0;-0,21;-0,21;-0,11;-0,11;-0,62;-0,62;-0,51;-0,51;-0,02;-0,02;-0,48;-0,48;
-01.02.2025;04:45;05:00;0,0;0,0;-0,34;-0,34;-0,37;-0,37;-0,61;-0,61;-0,52;-0,52;-0,01;-0,01;-0,05;-0,05;
-01.02.2025;05:00;05:15;0,0;0,0;-0,35;-0,35;-0,38;-0,38;-0,61;-0,61;-0,51;-0,51;-0,01;-0,01;-0,04;-0,04;
-01.02.2025;05:15;05:30;0,0;0,0;-0,02;-0,02;-0,39;-0,39;-0,62;-0,62;-0,51;-0,51;-0,39;-0,39;-0,05;-0,05;
-01.02.2025;05:30;05:45;0,0;0,0;-0,18;-0,18;-0,32;-0,32;-0,84;-0,84;-0,19;-0,19;-0,08;-0,08;-0,04;-0,04;
-01.02.2025;05:45;06:00;0,0;0,0;-0,44;-0,44;-0,74;-0,74;-0,24;-0,24;-0,14;-0,14;-0,01;-0,01;-0,05;-0,05;
-01.02.2025;06:00;06:15;0,0;0,0;-0,15;-0,15;-0,47;-0,47;-0,12;-0,12;-0,14;-0,14;-0,01;-0,01;-0,03;-0,03;
-01.02.2025;06:15;06:30;0,0;0,0;-0,33;-0,33;-0,07;-0,07;-0,13;-0,13;-0,7;-0,7;-0,01;-0,01;-0,59;-0,59;
-01.02.2025;06:30;06:45;0,0;0,0;-0,34;-0,34;-0,07;-0,07;-0,12;-0,12;-1,3;-1,3;-0,02;-0,02;-1,49;-1,49;
+05.02.2025;11:00;11:15;0,03;0,03;-0,74;-0,74;-0,1;-0,1;-0,53;-0,53;0,0;0,0;0,0;0,0;-0,18;-0,18;
+05.02.2025;11:15;11:30;0,83;0,14;-0,74;-0,56;-0,09;0,0;-0,48;-0,1;0,0;0,0;-0,01;0,0;-0,03;0,0;
+05.02.2025;11:30;11:45;1,2;0,15;-0,67;-0,41;-0,2;0,0;-0,56;-0,03;0,0;0,0;-0,02;0,0;-0,04;0,0;
+05.02.2025;11:45;12:00;1,14;0,24;-0,07;0,0;-0,25;0,0;-0,69;-0,15;0,0;0,0;-0,01;0,0;-0,03;0,0;
+05.02.2025;12:00;12:15;1,18;0,15;-0,35;-0,12;-0,24;0,0;-0,83;-0,33;0,0;0,0;-0,02;0,0;-0,04;0,0;
+05.02.2025;12:15;12:30;0,91;0,22;-0,24;-0,04;-0,27;0,0;-0,18;0,0;0,0;0,0;0,0;0,0;-0,04;0,0;
+05.02.2025;12:30;12:45;0,83;0,15;-0,39;-0,24;-0,29;0,0;-0,11;0,0;0,0;0,0;-0,01;0,0;-0,12;0,0;
+05.02.2025;12:45;13:00;1,05;0,03;-1,13;-0,96;-0,56;-0,2;-0,11;0,0;0,0;0,0;-0,02;0,0;-0,48;-0,12;
+05.02.2025;13:00;13:15;1,02;0,04;-0,24;-0,07;-0,63;-0,28;-0,12;0,0;0,0;0,0;0,0;0,0;-0,34;0,0;
+05.02.2025;13:15;13:30;1,0;0,33;-0,26;-0,01;-0,11;0,0;-0,11;0,0;0,0;0,0;-0,02;0,0;-0,18;0,0;
+05.02.2025;13:30;13:45;0,93;0,29;-0,21;0,0;-0,12;0,0;-0,11;0,0;0,0;0,0;-0,02;0,0;-0,18;0,0;
+05.02.2025;13:45;14:00;0,86;0,45;-0,11;0,0;-0,09;0,0;-0,11;0,0;0,0;0,0;-0,01;0,0;-0,09;0,0;
 `,
         "TESTING DUMMY",
     );
     refreshView();
 }
 
-// mock();
+mock();
