@@ -36,7 +36,7 @@ const gSettings: Settings = {
     filterValue: 0,
 };
 
-function logWarning(warning: string): void {
+function logWarning(warning: string, date: Date): void {
     warningDom.style.display = "block";
     if (warningDom.children.length === 0) {
         const dom = document.createElement("li");
@@ -45,7 +45,7 @@ function logWarning(warning: string): void {
         warningDom.appendChild(dom);
     }
     const dom = document.createElement("li");
-    dom.innerText = warning;
+    dom.innerText = `[${printDate(date)}] ${warning}`;
     warningDom.appendChild(dom);
 }
 
@@ -102,6 +102,8 @@ interface Interval {
 
     distributions: Measurement[];
     consumers: Measurement[];
+
+    errors: string[]
 }
 
 class Csv {
@@ -192,20 +194,21 @@ function parseCsv(csv: string, filename: string): Csv {
         const distributed: Measurement[] = [];
         const consumed: Measurement[] = [];
 
+        const errors = [] as string[];
+
         for (const ean of distributorEans) {
             let before = parseKwh(explodedLine[ean.csvIndex]);
             let after = parseKwh(explodedLine[ean.csvIndex + 1]);
             if (after > before) {
-                logWarning(
-                    `Distribution EAN ${ean.name} is distributing ${after - before} kWh more AFTER subtracting sharing on ${printDate(date)}.
-                    The report will clip sharing to 0.`,
-                );
+                const error = `Distribution EAN ${ean.name} is distributing ${after - before} kWh more AFTER subtracting sharing. The report will clip sharing to 0.`;
+                logWarning(error, date);
+                errors.push(error);
                 after = before;
             }
             if (before < 0 || after < 0) {
-                logWarning(
-                    `Distribution EAN ${ean.name} is consuming ${before / after} kWh power on ${printDate(date)}. The report will clip negative values to 0.`,
-                );
+                const error = `Distribution EAN ${ean.name} is consuming ${before / after} kWh power. The report will clip negative values to 0.`;
+                logWarning(error, date);
+                errors.push(error);
                 before = Math.max(0, before);
                 after = Math.max(0, after);
             }
@@ -219,16 +222,15 @@ function parseCsv(csv: string, filename: string): Csv {
             let before = -parseKwh(explodedLine[ean.csvIndex]);
             let after = -parseKwh(explodedLine[ean.csvIndex + 1]);
             if (after > before) {
-                logWarning(
-                    `Consumer EAN ${ean.name} is consuming ${after - before} kWh more AFTER subtracting sharing on ${printDate(date)}.
-                    The report will clip sharing to 0.`,
-                );
+                const error = `Consumer EAN ${ean.name} is consuming ${after - before} kWh more AFTER subtracting sharing. The report will clip sharing to 0.`;
+                logWarning(error, date);
+                errors.push(error);
                 after = before;
             }
             if (before < 0 || after < 0) {
-                logWarning(
-                    `Consumer EAN ${ean.name} is distributing ${before / after} kWh power on ${printDate(date)}. The report will clip negative values to 0.`,
-                );
+                const error = `Consumer EAN ${ean.name} is distributing ${before / after} kWh power. The report will clip negative values to 0.`;
+                logWarning(error, date);
+                errors.push(error);
                 before = Math.max(0, before);
                 after = Math.max(0, after);
             }
@@ -262,10 +264,10 @@ function parseCsv(csv: string, filename: string): Csv {
         const sumSharedConsumed = consumed.reduce((acc, val) => acc + (val.before - val.after), 0);
         assert(sumSharedConsumed >= 0, sumSharedConsumed, "Line", i);
         if (Math.abs(sumSharedDistributed - sumSharedConsumed) > 0.0001) {
-            logWarning(
-                `Energy shared from distributors does not match energy shared to consumers on ${printDate(date)}! \nDistributed: ${sumSharedDistributed}\n Consumed: ${sumSharedConsumed}.
-                The report will consider the mismatch not shared.`,
-            );
+            const error = `Energy shared from distributors does not match energy shared to consumers!\nDistributed: ${sumSharedDistributed}\nConsumed: ${sumSharedConsumed}.
+The report will consider the mismatch not shared.`;
+            logWarning(error, date);
+            errors.push(error);
             if (sumSharedDistributed > sumSharedConsumed) {
                 const fixDistributors = sumSharedConsumed / sumSharedDistributed;
                 console.log("Fixing distributors", fixDistributors);
@@ -296,6 +298,7 @@ function parseCsv(csv: string, filename: string): Csv {
             sumSharing: distributed.reduce((acc, val) => acc + (val.before - val.after), 0),
             distributions: distributed,
             consumers: consumed,
+            errors,
         });
     }
 
@@ -526,6 +529,10 @@ function displayCsv(csv: Csv): void {
                 cell.innerHTML = printKWh(i.before - i.after);
                 cell.classList.add("consumer");
             }
+        }
+        if (interval.errors.length > 0) {
+            tr.classList.add("error");
+            tr.title = interval.errors.join("\n"); 
         }
         intervalBody.appendChild(tr);
     }
