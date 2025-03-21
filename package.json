@@ -11,6 +11,7 @@
         "build": "npm run build:less && npm run build:ts"
     },
     "dependencies": {
+        "http-server": "^14.1.1",
         "lessc": "^1.0.2",
         "typescript": "^5.8.2"
     }

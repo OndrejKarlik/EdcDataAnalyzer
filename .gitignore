@@ -1,4 +1,10 @@
-/*.css
-/*.js
+
+
+# Actually commit compiled versions for github pages
+# /*.css
+# /*.js
+
+
 /*.tsbuildinfo
 /node_modules/*
+/package-lock.json
