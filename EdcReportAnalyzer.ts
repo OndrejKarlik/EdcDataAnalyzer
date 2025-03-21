@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-type-assertion */
 /* eslint-disable no-lone-blocks */
 
-import * as Chart from "chart.js/auto";
+import * as Chart from "./node_modules/chart.js/auto/auto.js";
 
 
 // TODO: test multiple distribution EANs
@@ -17,6 +17,7 @@ function assert(condition: boolean, ...loggingArgs: unknown[]): asserts conditio
     if (!condition) {
         const errorMsg = `Assert failed: ${loggingArgs.toString()}`;
         console.error("Assert failed", ...loggingArgs);
+        // eslint-disable-next-line no-debugger
         debugger;
         alert(errorMsg);
         throw new Error(errorMsg);
@@ -592,7 +593,6 @@ document.querySelectorAll('input[name="unit"]').forEach((button) => {
     });
 });
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function mock(): void {
     // Testing data
     gCsv = parseCsv(
@@ -616,3 +616,30 @@ export function mock(): void {
 }
 
 mock();
+
+
+const data = [
+    { year: 2010, count: 10 },
+    { year: 2011, count: 20 },
+    { year: 2012, count: 15 },
+    { year: 2013, count: 25 },
+    { year: 2014, count: 22 },
+    { year: 2015, count: 30 },
+    { year: 2016, count: 28 },
+];
+
+const chart = new Chart.Chart(
+    document.getElementById('graph') as HTMLCanvasElement,
+    {
+        type: 'bar',
+        data: {
+            labels: data.map(row => row.year),
+            datasets: [
+                {
+                    label: 'Acquisitions by year',
+                    data: data.map(row => row.count)
+                }
+            ]
+        }
+    }
+);

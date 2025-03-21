@@ -9,10 +9,10 @@ if (!fs.existsSync(distPath)) {
 }
 
 // Copy HTML file manually (ESBuild doesn't process HTML)
-fs.copyFileSync('src/EdcReportAnalyzer.html', 'dist/index.html');
+fs.copyFileSync('EdcReportAnalyzer.html', 'dist/index.html');
 
 esbuild.build({
-    entryPoints: ['src/EdcReportAnalyzer.js'],
+    entryPoints: ['EdcReportAnalyzer.js'],
     bundle: true,
     outfile: 'dist/EdcReportAnalyzer.js',
     minify: true,

@@ -7,7 +7,7 @@
         "start": "webpack serve --open",
         "clean": "tsc --build --clean",
         "build:ts": "tsc --build",
-        "build:less": "lessc src/EdcReportAnalyzer.less dist/EdcReportAnalyzer.css",
+        "build:less": "lessc EdcReportAnalyzer.less dist/EdcReportAnalyzer.css",
         "build:pack": "node build.cjs",
         "build": "npm run build:less && npm run build:ts && npm run build:pack"
     },
