@@ -2,6 +2,9 @@
 /* eslint-disable @typescript-eslint/no-unsafe-type-assertion */
 /* eslint-disable no-lone-blocks */
 
+import * as Chart from "chart.js/auto";
+
+
 // TODO: test multiple distribution EANs
 
 type Rgb = [number, number, number];
@@ -103,7 +106,7 @@ interface Interval {
     distributions: Measurement[];
     consumers: Measurement[];
 
-    errors: string[]
+    errors: string[];
 }
 
 class Csv {
@@ -532,7 +535,7 @@ function displayCsv(csv: Csv): void {
         }
         if (interval.errors.length > 0) {
             tr.classList.add("error");
-            tr.title = interval.errors.join("\n"); 
+            tr.title = interval.errors.join("\n");
         }
         intervalBody.appendChild(tr);
     }

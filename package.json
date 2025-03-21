@@ -1,16 +1,22 @@
 {
     "name": "edc-report-analyzer",
     "version": "1.0.0",
-    "main": "EdcReportAnalyzer.js",
+    "source": "EdcReportAnalyzer.html",
     "type": "module",
     "scripts": {
-        "test": "echo \"Error: no test specified\" && exit 1",
+        "start": "webpack serve --open",
         "clean": "tsc --build --clean",
         "build:ts": "tsc --build",
-        "build:less": "lessc EdcReportAnalyzer.less EdcReportAnalyzer.css",
-        "build": "npm run build:less && npm run build:ts"
+        "build:less": "lessc src/EdcReportAnalyzer.less dist/EdcReportAnalyzer.css",
+        "build:pack": "node build.cjs",
+        "build": "npm run build:less && npm run build:ts && npm run build:pack"
     },
     "dependencies": {
+        "chart.js": "^4.4.8"
+    },
+    "devDependencies": {
+        "esbuild": "^0.25.1",
+        "esbuild-server": "^0.3.0",
         "http-server": "^14.1.1",
         "lessc": "^1.0.2",
         "typescript": "^5.8.2"
