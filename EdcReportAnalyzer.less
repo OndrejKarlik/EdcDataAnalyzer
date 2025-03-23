@@ -46,6 +46,22 @@ table#csvMeta {
     width: auto;
 
     th {
+        text-align: right;
+    }
+
+    td {
+        text-align: left;
+    }
+}
+
+table#csv {
+    div.canvasHolder {
+        max-width: 10vw;
+        max-height: 10vw;
+        width: 100%;
+        aspect-ratio: 1;
+        height: auto;
+        margin: auto;
     }
 }
 
@@ -75,6 +91,14 @@ table#intervals {
         padding-top: 5px;
         padding-bottom: 5px;
     }
+
+    th.error {
+        background-color: red;
+    }
+
+    th.insufficient {
+        background-color: #8cb344;
+    }
 }
 
 ul#warnings {
@@ -95,8 +119,4 @@ th.consumer {
 tr.csvHeaderRow input {
     width: 100%;
     min-width: 0;
-}
-
-tr.error th {
-    background-color: red;
 }

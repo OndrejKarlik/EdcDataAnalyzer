@@ -1,10 +1,15 @@
 /* eslint-disable @typescript-eslint/non-nullable-type-assertion-style */
 /* eslint-disable @typescript-eslint/no-unsafe-type-assertion */
-/* eslint-disable no-lone-blocks */
+
+import * as Chart from "chart.js/auto";
 
 // TODO: test multiple distribution EANs
 
 type Rgb = [number, number, number];
+
+const GREEN = [14, 177, 14] as Rgb;
+const RED = [255, 35, 35] as Rgb;
+const GRAY = [150, 150, 150] as Rgb;
 
 function last<T>(container: T[]): T {
     return container[container.length - 1];
@@ -14,6 +19,7 @@ function assert(condition: boolean, ...loggingArgs: unknown[]): asserts conditio
     if (!condition) {
         const errorMsg = `Assert failed: ${loggingArgs.toString()}`;
         console.error("Assert failed", ...loggingArgs);
+        // eslint-disable-next-line no-debugger
         debugger;
         alert(errorMsg);
         throw new Error(errorMsg);
@@ -24,17 +30,23 @@ const warningDom = document.getElementById("warnings") as HTMLDivElement;
 const fileDom = document.getElementById("uploadCsv") as HTMLInputElement;
 const filterDom = document.getElementById("filterSlider") as HTMLInputElement;
 
-interface Settings {
-    displayUnit: "kWh" | "kW";
-    hideEans: boolean;
-    filterValue: number;
+type GroupingOptions = "15m" | "1h" | "1d" | "1m";
+type DisplayUnit = "kWh" | "kW";
+
+class Settings {
+    displayUnit: DisplayUnit = "kWh";
+    anonymizeEans = false;
+    filterValue = 0;
+    grouping: GroupingOptions = "1d";
+
+    hiddenEans = new Set<string>();
+
+    useFiltering(): boolean {
+        return this.grouping === "15m" || this.grouping === "1h";
+    }
 }
 
-const gSettings: Settings = {
-    displayUnit: "kWh",
-    hideEans: false,
-    filterValue: 0,
-};
+const gSettings = new Settings();
 
 function logWarning(warning: string, date: Date): void {
     warningDom.style.display = "block";
@@ -59,11 +71,17 @@ function parseKwh(input: string): number {
     return result;
 }
 
-function printKWh(input: number, alwaysKwh = false): string {
-    if (gSettings.displayUnit === "kW" && !alwaysKwh) {
-        return `${(input * 4).toFixed(2)}&nbsp;kW`;
+interface PrintKWhOptions {
+    alwaysKwh?: boolean; // Default false
+    nbsp?: boolean; // Default false
+}
+function printKWh(input: number, options?: PrintKWhOptions): string {
+    const alwaysKWh = options?.alwaysKwh ?? false;
+    const nsbsp = (options?.nbsp ?? false) ? "&nbsp;" : " ";
+    if (gSettings.displayUnit === "kW" && !alwaysKWh) {
+        return `${(input * 4).toFixed(2)}${nsbsp}kW`;
     } else {
-        return `${input.toFixed(2)}&nbsp;kWh`;
+        return `${input.toFixed(2)}${nsbsp}kWh`;
     }
 }
 
@@ -83,7 +101,7 @@ function getDate(explodedLine: string[]): Date {
 function printEan(input: string): string {
     assert(input.length === 18);
     // input = input.replace("859182400", "…"); // Does not look good...
-    if (gSettings.hideEans) {
+    if (gSettings.anonymizeEans) {
         input = `859182400xxxxxxx${input.substring(16)}`;
         assert(input.length === 18);
     }
@@ -99,11 +117,30 @@ interface Interval {
     start: Date;
 
     sumSharing: number;
+    sumMissed: number;
 
     distributions: Measurement[];
     consumers: Measurement[];
 
-    errors: string[]
+    errors: string[];
+}
+
+function accumulateTo(to: Interval, from: Interval): void {
+    assert(
+        to.distributions.length === from.distributions.length &&
+            to.consumers.length === from.consumers.length,
+    );
+    to.sumSharing += from.sumSharing;
+    to.sumMissed += from.sumMissed;
+    for (let i = 0; i < to.distributions.length; ++i) {
+        to.distributions[i].before += from.distributions[i].before;
+        to.distributions[i].after += from.distributions[i].after;
+    }
+    for (let i = 0; i < to.consumers.length; ++i) {
+        to.consumers[i].before += from.consumers[i].before;
+        to.consumers[i].after += from.consumers[i].after;
+    }
+    to.errors.push(...from.errors);
 }
 
 class Csv {
@@ -119,11 +156,88 @@ class Csv {
 
     intervals: Interval[] = [];
 
-    constructor(filename: string, intervals: Interval[]) {
+    constructor(filename: string, intervals: Interval[], distributionEans: Ean[], consumerEans: Ean[]) {
         this.filename = filename;
         this.intervals = intervals;
         this.dateFrom = intervals[0].start;
-        this.dateTo = last(intervals).start;
+        this.dateTo = structuredClone(last(intervals).start);
+        this.dateTo.setMinutes(this.dateTo.getMinutes() + 15);
+        this.distributionEans = distributionEans;
+        this.consumerEans = consumerEans;
+
+        this.sharedTotal = distributionEans.reduce((acc, val) => acc + val.shared(), 0);
+        this.missedTotal = consumerEans.reduce((acc, val) => acc + val.missedDueToAllocation, 0);
+
+        // Sort columns
+        const newDistributionEans = [] as Ean[];
+        const newConsumerEans = [] as Ean[];
+
+        const findSmallestEan = (eans: Ean[]): number => {
+            let result = 0;
+            for (let i = 1; i < eans.length; ++i) {
+                if (eans[i].name < eans[result].name) {
+                    result = i;
+                }
+            }
+            if (result !== 0) {
+                console.log("Swapping EANs: ", eans[result].name, eans[0].name);
+            }
+            return result;
+        };
+        while (this.distributionEans.length > 0) {
+            const index = findSmallestEan(this.distributionEans);
+            newDistributionEans.push(this.distributionEans[index]);
+            for (const i of intervals) {
+                i.distributions.push(i.distributions[index]);
+                i.distributions.splice(index, 1);
+            }
+            this.distributionEans.splice(index, 1);
+        }
+        while (this.consumerEans.length > 0) {
+            const index = findSmallestEan(this.consumerEans);
+            newConsumerEans.push(this.consumerEans[index]);
+            for (const i of intervals) {
+                i.consumers.push(i.consumers[index]);
+                i.consumers.splice(index, 1);
+            }
+            this.consumerEans.splice(index, 1);
+        }
+        this.distributionEans = newDistributionEans;
+        this.consumerEans = newConsumerEans;
+    }
+
+    getGroupedIntervals(grouping: GroupingOptions): Interval[] {
+        if (grouping === "15m") {
+            return this.intervals;
+        }
+        const result: Interval[] = [];
+        for (let i = 0; i < this.intervals.length; ++i) {
+            let mergeToLast = false;
+            if (i > 0) {
+                const dateLast = this.intervals[i - 1].start;
+                const dateThis = this.intervals[i].start;
+                switch (grouping) {
+                    case "1h":
+                        mergeToLast = dateThis.getHours() === dateLast.getHours();
+                        break;
+                    case "1d":
+                        mergeToLast = dateThis.getDate() === dateLast.getDate();
+                        break;
+                    case "1m":
+                        mergeToLast = dateThis.getMonth() === dateLast.getMonth();
+                        break;
+                    default:
+                        throw new Error();
+                }
+            }
+            if (mergeToLast) {
+                accumulateTo(last(result), this.intervals[i]);
+            } else {
+                result.push(structuredClone(this.intervals[i]));
+            }
+        }
+        console.log("Merging intervals", this.intervals.length, "=>", result.length);
+        return result;
     }
 }
 
@@ -137,6 +251,10 @@ class Ean {
     constructor(name: string, csvIndex: number) {
         this.name = name;
         this.csvIndex = csvIndex;
+    }
+
+    shared(): number {
+        return this.originalBalance - this.adjustedBalance;
     }
 }
 
@@ -173,7 +291,6 @@ function parseCsv(csv: string, filename: string): Csv {
     }
 
     // Maps from time to missing sharing for that time slot
-    const missedSharingDueToAllocationTimeSlots = new Map<number, number>();
     const intervals = [] as Interval[];
 
     for (let i = 1; i < lines.length; ++i) {
@@ -189,7 +306,7 @@ function parseCsv(csv: string, filename: string): Csv {
                 (explodedLine.length === expectedLength + 1 && last(explodedLine) === ""),
             `Wrong number of items: ${explodedLine.length}, expected: ${expectedLength}, line number: ${i}. Last item on line is "${last(explodedLine)}"`,
         );
-        const date = getDate(explodedLine);
+        const dateStart = getDate(explodedLine);
 
         const distributed: Measurement[] = [];
         const consumed: Measurement[] = [];
@@ -201,13 +318,13 @@ function parseCsv(csv: string, filename: string): Csv {
             let after = parseKwh(explodedLine[ean.csvIndex + 1]);
             if (after > before) {
                 const error = `Distribution EAN ${ean.name} is distributing ${after - before} kWh more AFTER subtracting sharing. The report will clip sharing to 0.`;
-                logWarning(error, date);
+                logWarning(error, dateStart);
                 errors.push(error);
                 after = before;
             }
             if (before < 0 || after < 0) {
                 const error = `Distribution EAN ${ean.name} is consuming ${before / after} kWh power. The report will clip negative values to 0.`;
-                logWarning(error, date);
+                logWarning(error, dateStart);
                 errors.push(error);
                 before = Math.max(0, before);
                 after = Math.max(0, after);
@@ -223,13 +340,13 @@ function parseCsv(csv: string, filename: string): Csv {
             let after = -parseKwh(explodedLine[ean.csvIndex + 1]);
             if (after > before) {
                 const error = `Consumer EAN ${ean.name} is consuming ${after - before} kWh more AFTER subtracting sharing. The report will clip sharing to 0.`;
-                logWarning(error, date);
+                logWarning(error, dateStart);
                 errors.push(error);
                 after = before;
             }
             if (before < 0 || after < 0) {
                 const error = `Consumer EAN ${ean.name} is distributing ${before / after} kWh power. The report will clip negative values to 0.`;
-                logWarning(error, date);
+                logWarning(error, dateStart);
                 errors.push(error);
                 before = Math.max(0, before);
                 after = Math.max(0, after);
@@ -243,6 +360,7 @@ function parseCsv(csv: string, filename: string): Csv {
         // If there is still some power left after sharing, we check that all consumers have 0 adjusted power.
         // If there was some consumer left with non-zero power, it means there was energy that could have been
         // shared, but wasn't due to bad allocation.
+        let sumMissed = 0;
         const sumDistributorsAfter = distributed.reduce((acc, val) => acc + val.after, 0);
         if (sumDistributorsAfter > 0) {
             let sumConsumersAfter = consumed.reduce((acc, val) => acc + val.after, 0);
@@ -253,7 +371,7 @@ function parseCsv(csv: string, filename: string): Csv {
             // There are plenty of intervals where distribution before and after are both 0.01 and no sharing
             // is performed...:
             if (sumConsumersAfter > 0.0 && sumDistributorsAfter > 0.0) {
-                missedSharingDueToAllocationTimeSlots.set(date.getTime(), sumConsumersAfter);
+                sumMissed = sumConsumersAfter;
                 for (let j = 0; j < consumerEans.length; ++j) {
                     consumerEans[j].missedDueToAllocation += consumed[j].after * missedScale;
                 }
@@ -266,7 +384,7 @@ function parseCsv(csv: string, filename: string): Csv {
         if (Math.abs(sumSharedDistributed - sumSharedConsumed) > 0.0001) {
             const error = `Energy shared from distributors does not match energy shared to consumers!\nDistributed: ${sumSharedDistributed}\nConsumed: ${sumSharedConsumed}.
 The report will consider the mismatch not shared.`;
-            logWarning(error, date);
+            logWarning(error, dateStart);
             errors.push(error);
             if (sumSharedDistributed > sumSharedConsumed) {
                 const fixDistributors = sumSharedConsumed / sumSharedDistributed;
@@ -294,25 +412,16 @@ The report will consider the mismatch not shared.`;
         }
 
         intervals.push({
-            start: date,
+            start: dateStart,
             sumSharing: distributed.reduce((acc, val) => acc + (val.before - val.after), 0),
+            sumMissed,
             distributions: distributed,
             consumers: consumed,
             errors,
         });
     }
 
-    const result = new Csv(filename, intervals);
-
-    result.distributionEans = distributorEans;
-    result.consumerEans = consumerEans;
-
-    result.sharedTotal = distributorEans.reduce(
-        (acc, val) => acc + val.originalBalance - val.adjustedBalance,
-        0,
-    );
-    result.missedTotal = consumerEans.reduce((acc, val) => acc + val.missedDueToAllocation, 0);
-    return result;
+    return new Csv(filename, intervals, distributorEans, consumerEans);
 }
 
 function colorizeRange(query: string, rgb: Rgb): void {
@@ -323,21 +432,27 @@ function colorizeRange(query: string, rgb: Rgb): void {
     let minimum = 0; // It works better with filtering if minimum is always 0
     let maximum = 0;
     for (const i of collection) {
-        const value = parseFloat((i as HTMLElement).innerText);
-        maximum = Math.max(maximum, value);
-        minimum = Math.min(minimum, value);
+        const valueStr = (i as HTMLElement).innerText;
+        if (valueStr.length > 0) {
+            const value = parseFloat(valueStr);
+            maximum = Math.max(maximum, value);
+            minimum = Math.min(minimum, value);
+        }
     }
     // console.log(minimum, maximum);
     assert(!isNaN(maximum), `There is a NaN when colorizing query${query}`);
     // console.log("Colorizing with maximum", maximum);
     for (const i of collection) {
         const htmlElement = i as HTMLElement;
-        const alpha = (parseFloat(htmlElement.innerText) - minimum) / Math.max(0.00001, maximum - minimum);
-        // console.log(htmlElement);
-        assert(!isNaN(alpha), "There is NaN somewhere in data", alpha);
-        const cssString = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${alpha})`;
-        // console.log(cssString);
-        htmlElement.style.backgroundColor = cssString;
+        if (htmlElement.innerText.length > 0) {
+            const alpha =
+                (parseFloat(htmlElement.innerText) - minimum) / Math.max(0.00001, maximum - minimum);
+            // console.log(htmlElement);
+            assert(!isNaN(alpha), "There is NaN somewhere in data", alpha);
+            const cssString = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${alpha})`;
+            // console.log(cssString);
+            htmlElement.style.backgroundColor = cssString;
+        }
     }
 }
 
@@ -360,20 +475,34 @@ function setupHeader(table: HTMLTableElement, csv: Csv, editableNames: boolean):
     const createCell = (domClass: string, ean: Ean): void => {
         const th = document.createElement("th");
         th.classList.add(domClass);
-        th.innerText = printEan(ean.name);
-        if (editableNames) {
-            const input = document.createElement("input");
-            input.type = "text";
-            input.value = recallEanAlias(ean);
-            input.addEventListener("change", () => {
-                saveEanAlias(ean, input.value);
-                refreshView();
-            });
-            th.appendChild(input);
-        } else {
-            const recalled = recallEanAlias(ean);
-            if (recalled.length > 0) {
-                th.innerHTML += `<br>(${recalled})`;
+        const close = document.createElement("input");
+        close.type = "checkbox";
+        close.checked = !gSettings.hiddenEans.has(ean.name);
+        close.addEventListener("click", () => {
+            if (close.checked) {
+                gSettings.hiddenEans.delete(ean.name);
+            } else {
+                gSettings.hiddenEans.add(ean.name);
+            }
+            refreshView();
+        });
+        th.appendChild(close);
+        if (!gSettings.hiddenEans.has(ean.name)) {
+            th.appendChild(document.createTextNode(printEan(ean.name)));
+            if (editableNames) {
+                const input = document.createElement("input");
+                input.type = "text";
+                input.value = recallEanAlias(ean);
+                input.addEventListener("change", () => {
+                    saveEanAlias(ean, input.value);
+                    refreshView();
+                });
+                th.appendChild(input);
+            } else {
+                const recalled = recallEanAlias(ean);
+                if (recalled.length > 0) {
+                    th.innerHTML += `<br>(${recalled})`;
+                }
             }
         }
         theader.appendChild(th);
@@ -394,159 +523,277 @@ function printOnlyDate(date: Date): string {
 function printDate(date: Date): string {
     return `${printOnlyDate(date)} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
-
-function displayCsv(csv: Csv): void {
-    const startTime = performance.now();
-    assert(gSettings.filterValue >= 0 && gSettings.filterValue <= 1);
-    const GREEN = [14, 177, 14] as Rgb;
-    const RED = [255, 35, 35] as Rgb;
-    const GRAY = [150, 150, 150] as Rgb;
-
-    {
-        // Input data
-        document.getElementById("filename")!.innerText = csv.filename;
-        document.getElementById("intervalFrom")!.innerText = printDate(csv.dateFrom);
-        document.getElementById("intervalTo")!.innerText = printDate(csv.dateTo);
+function printGroupedDate(date: Date, useNbsp = true): string {
+    const nbsp = useNbsp ? "&nbsp;" : " ";
+    switch (gSettings.grouping) {
+        case "15m":
+            return `${printDate(date)}${nbsp}-${nbsp}${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes() + 14).padStart(2, "0")}`;
+        case "1h":
+            return `${printOnlyDate(date)} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+        case "1d":
+            return printOnlyDate(date);
+        case "1m":
+            return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+        default:
+            throw Error();
     }
+}
 
-    {
-        // Summary
-        setupHeader(document.getElementById("csv") as HTMLTableElement, csv, true);
-        const tbody = document.getElementById("csvBody");
-        assert(tbody !== null);
-        tbody.innerHTML = "";
+function displayInputData(csv: Csv): void {
+    document.getElementById("filename")!.innerText = csv.filename;
+    document.getElementById("intervalFrom")!.innerText = printDate(csv.dateFrom);
+    document.getElementById("intervalTo")!.innerText = printDate(csv.dateTo);
+    const timeDiff = Math.abs(csv.dateTo.getTime() - csv.dateFrom.getTime());
+    const dayDiff = Math.ceil(timeDiff / (1000 * 3600 * 24));
+    document.getElementById("intervalLength")!.innerText = `${dayDiff} days`;
+}
 
-        let rowId = 0;
-        const makeRow = (header: string, backgroundColor: Rgb, printFn: (ean: Ean) => string): void => {
-            const row = document.createElement("tr");
-            const id = `row${rowId++}`;
-            row.classList.add(id);
-            const th = document.createElement("th");
-            row.appendChild(th);
-            th.innerHTML = header;
-            for (const ean of csv.distributionEans) {
-                const cell = row.insertCell();
+function displaySummary(csv: Csv): void {
+    setupHeader(document.getElementById("csv") as HTMLTableElement, csv, true);
+    const tbody = document.getElementById("csvBody");
+    assert(tbody !== null);
+    tbody.innerHTML = "";
+
+    let rowId = 0;
+    const makeRow = (header: string, backgroundColor: Rgb, printFn: (ean: Ean) => string): void => {
+        const row = document.createElement("tr");
+        const id = `row${rowId++}`;
+        row.classList.add(id);
+        const th = document.createElement("th");
+        row.appendChild(th);
+        th.innerHTML = header;
+        for (const ean of csv.distributionEans) {
+            const cell = row.insertCell();
+            cell.classList.add("distribution");
+            if (!gSettings.hiddenEans.has(ean.name)) {
                 cell.innerHTML = printFn(ean);
-                cell.classList.add("distribution");
             }
-            row.insertCell().classList.add("split");
-            for (const ean of csv.consumerEans) {
-                const cell = row.insertCell();
+        }
+        row.insertCell().classList.add("split");
+        for (const ean of csv.consumerEans) {
+            const cell = row.insertCell();
+            cell.classList.add("consumer");
+            if (!gSettings.hiddenEans.has(ean.name)) {
                 cell.innerHTML = printFn(ean);
-                cell.classList.add("consumer");
             }
-            tbody.appendChild(row);
-            colorizeRange(`table#csv tr.${id} td.consumer`, backgroundColor);
-            colorizeRange(`table#csv tr.${id} td.distribution`, backgroundColor);
-        };
-
-        makeRow("Original [kWh]:", GRAY, (ean) => printKWh(ean.originalBalance, true));
-        makeRow("Adjusted [kWh]:", GRAY, (ean) => printKWh(ean.adjustedBalance, true));
-        makeRow("Shared [kWh]:", GREEN, (ean) => printKWh(ean.originalBalance - ean.adjustedBalance, true));
-        makeRow("Missed [kWh]:", RED, (ean) => printKWh(ean.missedDueToAllocation, true));
-    }
-
-    let minSharingDistributor = Infinity;
-    let maxSharingDistributor = 0;
-    let minSharingConsumer = Infinity;
-    let maxSharingConsumer = 0;
-    for (const interval of csv.intervals) {
-        for (const i of interval.distributions) {
-            const sharing = i.before - i.after;
-            maxSharingDistributor = Math.max(maxSharingDistributor, sharing);
-            minSharingDistributor = Math.min(minSharingDistributor, sharing);
         }
-        for (const i of interval.consumers) {
-            const sharing = i.before - i.after;
-            maxSharingConsumer = Math.max(maxSharingConsumer, sharing);
-            minSharingConsumer = Math.min(minSharingConsumer, sharing);
-        }
-    }
+        tbody.appendChild(row);
+        colorizeRange(`table#csv tr.${id} td.consumer`, backgroundColor);
+        colorizeRange(`table#csv tr.${id} td.distribution`, backgroundColor);
+    };
 
-    const maxSharingInterval = csv.intervals.reduce((acc, val) => Math.max(acc, val.sumSharing), 0);
-    const minSharingInterval = csv.intervals.reduce((acc, val) => Math.min(acc, val.sumSharing), Infinity);
+    const printOptions = { alwaysKwh: true, nbsp: true };
+    makeRow("Original (without&nbsp;sharing) [kWh]:", GRAY, (ean) =>
+        printKWh(ean.originalBalance, printOptions),
+    );
+    makeRow("Adjusted (with&nbsp;sharing) [kWh]:", GRAY, (ean) =>
+        printKWh(ean.adjustedBalance, printOptions),
+    );
+    makeRow("Shared [kWh]:", GREEN, (ean) => printKWh(ean.shared(), printOptions));
+    makeRow("Missed [kWh]:", RED, (ean) => printKWh(ean.missedDueToAllocation, printOptions));
+
+    const graphRow = document.createElement("tr");
+    const graphTh = document.createElement("th");
+    graphTh.innerHTML = "Graphs:";
+    graphRow.appendChild(graphTh);
+
+    const makeChart = (cell: HTMLElement, ean: Ean): void => {
+        if (!gSettings.hiddenEans.has(ean.name) && ean.originalBalance > 0) {
+            const canvasHolder = document.createElement("div");
+            canvasHolder.classList.add("canvasHolder");
+            const canvas = document.createElement("canvas");
+            canvasHolder.appendChild(canvas);
+            cell.appendChild(canvasHolder);
+            const getPercent = (x: number): number => Math.round((x / ean.originalBalance) * 100);
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+            const graph = new Chart.Chart(canvas, {
+                type: "pie",
+                data: {
+                    labels: ["Shared", "Missed", "Rest"],
+                    datasets: [
+                        {
+                            label: "%",
+                            data: [
+                                getPercent(ean.shared()),
+                                getPercent(ean.missedDueToAllocation),
+                                getPercent(ean.adjustedBalance - ean.missedDueToAllocation),
+                            ],
+                            backgroundColor: ["green", "red", "gray"],
+                            borderWidth: 0.5,
+                        },
+                    ],
+                },
+                options: {
+                    plugins: {
+                        legend: {
+                            display: false,
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label(tooltipItem): string {
+                                    // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
+                                    return `${tooltipItem.raw} %`; // Show % in tooltip
+                                },
+                            },
+                        },
+                    },
+                },
+            });
+        }
+    };
+    for (const ean of csv.distributionEans) {
+        const cell = graphRow.insertCell();
+        cell.classList.add("distribution");
+        makeChart(cell, ean);
+    }
+    graphRow.insertCell().classList.add("split");
+    for (const ean of csv.consumerEans) {
+        const cell = graphRow.insertCell();
+        cell.classList.add("consumer");
+        makeChart(cell, ean);
+    }
+    tbody.appendChild(graphRow);
+}
+
+function displayIntervals(csv: Csv): void {
+    const groupedIntervals = csv.getGroupedIntervals(gSettings.grouping);
+
+    const maxSharingInterval = groupedIntervals.reduce((acc, val) => Math.max(acc, val.sumSharing), 0);
+    const minSharingInterval = groupedIntervals.reduce((acc, val) => Math.min(acc, val.sumSharing), Infinity);
     const intervalTable = document.getElementById("intervals");
     const intervalBody = intervalTable!.querySelector("tbody")!;
     intervalBody.innerHTML = "";
     // Intervals
     setupHeader(document.getElementById("intervals") as HTMLTableElement, csv, false);
 
-    let lastDisplayed: null | Interval = null;
+    for (let intervalIndex = 0; intervalIndex < groupedIntervals.length; ++intervalIndex) {
+        const interval = groupedIntervals[intervalIndex];
 
-    for (let intervalIndex = 0; intervalIndex < csv.intervals.length; ++intervalIndex) {
-        const interval = csv.intervals[intervalIndex];
-
+        const useFiltering = gSettings.useFiltering();
         if (
-            intervalIndex !== csv.intervals.length - 1 &&
-            interval.start.getDate() !== csv.intervals[intervalIndex + 1].start.getDate()
+            useFiltering &&
+            (intervalIndex === 0 ||
+                groupedIntervals[intervalIndex - 1].start.getDate() !== interval.start.getDate())
         ) {
-            // Last interval of the day
-            if (!lastDisplayed || interval.start.getDate() !== lastDisplayed.start.getDate()) {
-                const separator = document.createElement("tr");
-                separator.classList.add("daySeparator");
-                const th = document.createElement("th");
-                th.innerHTML = printOnlyDate(interval.start);
-                const td2 = document.createElement("td");
-                td2.colSpan = csv.distributionEans.length + csv.consumerEans.length + 1;
-                td2.innerHTML = "All Filtered out";
-                separator.appendChild(th);
-                separator.appendChild(td2);
-                intervalBody.appendChild(separator);
-            }
+            const separator = document.createElement("tr");
+            separator.classList.add("daySeparator");
+            const th = document.createElement("th");
+            th.innerHTML = `↓ ${printOnlyDate(interval.start)} ↓`;
+            th.colSpan = csv.distributionEans.length + csv.consumerEans.length + 2;
+            separator.appendChild(th);
+            intervalBody.appendChild(separator);
         }
 
-        if (interval.sumSharing < maxSharingInterval * gSettings.filterValue) {
+        if (useFiltering && interval.sumSharing < maxSharingInterval * gSettings.filterValue) {
             continue;
         }
-        lastDisplayed = interval;
         const tr = document.createElement("tr");
 
-        // Optimization: do not use colorizeRange()
-        const getBackground = (value: number, minimum: number, maximum: number): string => {
-            const alpha = (value - minimum) / Math.max(0.00001, maximum - minimum);
-            return `rgba(${GREEN[0]}, ${GREEN[1]}, ${GREEN[2]}, ${alpha})`;
-        };
+        const th = document.createElement("th");
+        tr.appendChild(th);
+        th.innerHTML = printGroupedDate(interval.start);
 
-        if (1) {
-            // Speed optimization
-            tr.innerHTML = `<th>${printDate(interval.start)} - ${String(interval.start.getHours()).padStart(2, "0")}:${String(interval.start.getMinutes() + 14).padStart(2, "0")}</th>
-                            ${interval.distributions.map((i) => `<td class='distribution' style="background-color:${getBackground(i.before - i.after, minSharingDistributor, maxSharingDistributor)}">${printKWh(i.before - i.after)}</td>`).join("")}
-                            <td class='split'></td>
-                            ${interval.consumers.map((i) => `<td class='consumer' style="background-color:${getBackground(i.before - i.after, minSharingConsumer, maxSharingConsumer)}">${printKWh(i.before - i.after)}</td>`).join("")}`;
-        } else {
-            const th = document.createElement("th");
-            tr.appendChild(th);
-            th.innerHTML = `${printDate(interval.start)} - ${String(interval.start.getHours()).padStart(2, "0")}:${String(interval.start.getMinutes() + 14).padStart(2, "0")}`;
-
-            for (const i of interval.distributions) {
-                const cell = tr.insertCell();
-                cell.innerHTML = printKWh(i.before - i.after);
-                cell.classList.add("distribution");
-            }
-            tr.insertCell().classList.add("split");
-            for (const i of interval.consumers) {
-                const cell = tr.insertCell();
-                cell.innerHTML = printKWh(i.before - i.after);
-                cell.classList.add("consumer");
-            }
-        }
+        const sumDistributedBefore = interval.distributions.reduce((prev, i) => prev + i.before, 0);
+        // const sumDistributedAfter = interval.distributions.reduce((prev, i) => prev + i.after, 0);
+        const sumConsumedBefore = interval.consumers.reduce((prev, i) => prev + i.before, 0);
+        const sumConsumedAfter = interval.consumers.reduce((prev, i) => prev + i.after, 0);
         if (interval.errors.length > 0) {
-            tr.classList.add("error");
-            tr.title = interval.errors.join("\n"); 
+            th.classList.add("error");
+            th.title = interval.errors.join("\n");
+            // } else if (interval.sumMissed > 0) {
+            //   th.classList.add("missed");
+            //   th.title = `Missed ${printKWh(interval.sumMissed)} due to sub-optimal allocation keys.`;
+        } else if (sumConsumedAfter > 0.05 * sumConsumedBefore) {
+            th.classList.add("insufficient");
+            th.title = "Distribution EANs did not produce enough power to share.\n";
+            th.title += `Consumed before sharing: ${printKWh(sumConsumedBefore)}\n`;
+            th.title += `Consumed after sharing: ${printKWh(sumConsumedAfter)}\n`;
+            th.title += `Produced: ${printKWh(sumDistributedBefore)} (might not have been entirely shared due to timing and allocation issues)`;
+        } else {
+            th.title += `Consumed before sharing: ${printKWh(sumConsumedBefore)}\n`;
+            th.title += `Consumed after sharing: ${printKWh(sumConsumedAfter)}\n`;
+            th.title += `Produced: ${printKWh(sumDistributedBefore)} (might not have been entirely shared due to timing and allocation issues)`;
+            th.classList.add("sufficient");
         }
+
+        for (let i = 0; i < interval.distributions.length; ++i) {
+            const cell = tr.insertCell();
+            if (!gSettings.hiddenEans.has(csv.distributionEans[i].name)) {
+                cell.innerHTML = printKWh(
+                    interval.distributions[i].before - interval.distributions[i].after,
+                    { nbsp: true },
+                );
+            }
+            cell.classList.add("distribution");
+        }
+        tr.insertCell().classList.add("split");
+        for (let i = 0; i < interval.consumers.length; ++i) {
+            const cell = tr.insertCell();
+            if (!gSettings.hiddenEans.has(csv.consumerEans[i].name)) {
+                cell.innerHTML = printKWh(interval.consumers[i].before - interval.consumers[i].after, {
+                    nbsp: true,
+                });
+            }
+            cell.classList.add("consumer");
+        }
+
         intervalBody.appendChild(tr);
     }
-    document.getElementById("minFilter")!.innerHTML = printKWh(minSharingInterval);
-    document.getElementById("maxFilter")!.innerHTML = printKWh(maxSharingInterval);
+    document.getElementById("minFilter")!.innerHTML = printKWh(minSharingInterval, { nbsp: true });
+    document.getElementById("maxFilter")!.innerHTML = printKWh(maxSharingInterval, { nbsp: true });
 
     (document.getElementById("thresholdFilter") as HTMLInputElement).innerHTML = printKWh(
         maxSharingInterval * gSettings.filterValue,
+        { nbsp: true },
     );
 
-    // console.log("Colorizing table#intervals td.consumer");
     colorizeRange("table#intervals td.consumer", GREEN);
-    // console.log("Colorizing table#intervals td.distribution");
     colorizeRange("table#intervals td.distribution", GREEN);
+
+    // Graph
+    const holder = document.getElementById("intervalsGraph")!;
+    holder.innerHTML = "";
+    const canvas = document.createElement("canvas");
+    holder.appendChild(canvas);
+
+    const labels = groupedIntervals.map((i: Interval) => printGroupedDate(i.start, false));
+    const shared = groupedIntervals.map((i: Interval) => i.sumSharing);
+    const missed = groupedIntervals.map((i: Interval) => i.sumMissed);
+    // console.log(labels);
+    // console.log(shared);
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const chart = new Chart.Chart(canvas, {
+        type: "bar",
+        data: {
+            labels,
+            datasets: [
+                { label: "Shared", data: shared, backgroundColor: "green" },
+                { label: "Missed", data: missed, backgroundColor: "red" },
+            ],
+        },
+        options: {
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    stacked: true,
+                },
+                x: {
+                    stacked: true,
+                },
+            },
+            plugins: {},
+        },
+    });
+}
+
+function displayCsv(csv: Csv): void {
+    const startTime = performance.now();
+    assert(gSettings.filterValue >= 0 && gSettings.filterValue <= 1);
+
+    displayInputData(csv);
+    displaySummary(csv);
+    displayIntervals(csv);
 
     console.log("displayCsv took", performance.now() - startTime, "ms");
 }
@@ -578,23 +825,31 @@ filterDom.addEventListener("input", () => {
     gSettings.filterValue = 1 - parseInt(filterDom.value, 10) / 100;
     refreshView();
 });
-document.getElementById("hideEans")!.addEventListener("change", () => {
-    gSettings.hideEans = (document.getElementById("hideEans") as HTMLInputElement).checked;
+document.getElementById("anonymizeEans")!.addEventListener("change", () => {
+    gSettings.anonymizeEans = (document.getElementById("anonymizeEans") as HTMLInputElement).checked;
     refreshView();
 });
 document.querySelectorAll('input[name="unit"]').forEach((button) => {
     button.addEventListener("change", (e) => {
-        gSettings.displayUnit = (e.target as HTMLInputElement).value as "kWh" | "kW";
+        gSettings.displayUnit = (e.target as HTMLInputElement).value as DisplayUnit;
+        refreshView();
+    });
+});
+document.querySelectorAll('input[name="group"]').forEach((button) => {
+    button.addEventListener("change", (e) => {
+        gSettings.grouping = (e.target as HTMLInputElement).value as GroupingOptions;
+        document.getElementById("minFilterParent")!.style.display = gSettings.useFiltering()
+            ? "block"
+            : "none";
         refreshView();
     });
 });
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function mock(): void {
     // Testing data
     gCsv = parseCsv(
-        `Datum;Cas od;Cas do;IN-859182400000000001-D;OUT-859182400000000001-D;IN-859182400000000002-O;OUT-859182400000000002-O;IN-859182400000000003-O;OUT-859182400000000003-O;IN-859182400000000004-O;OUT-859182400000000004-O;IN-859182400000000005-O;OUT-859182400000000005-O;IN-859182400000000006-O;OUT-859182400000000006-O;IN-859182400000000007-O;OUT-859182400000000007-O
-05.02.2025;11:00;11:15;0,03;0,03;-0,74;-0,74;-0,1;-0,1;-0,53;-0,53;0,0;0,0;0,0;0,0;-0,18;-0,18;
+        `Datum;Cas od;Cas do;IN-859182400020000001-D;OUT-859182400020000001-D;IN-859182400000000002-O;OUT-859182400000000002-O;IN-859182400000000013-O;OUT-859182400000000013-O;IN-859182400000000004-O;OUT-859182400000000004-O;IN-859182400000000005-O;OUT-859182400000000005-O;IN-859182400000000006-O;OUT-859182400000000006-O;IN-859182400000000007-O;OUT-859182400000000007-O
+05.02.2025;11:00;11:15;10,03;0,03;-0,74;-0,74;-10,1;-0,1;-0,53;-0,53;0,0;0,0;0,0;0,0;-0,18;-0,18;
 05.02.2025;11:15;11:30;0,83;0,14;-0,74;-0,56;-0,09;0,0;-0,48;-0,1;0,0;0,0;-0,01;0,0;-0,03;0,0;
 05.02.2025;11:30;11:45;1,2;0,15;-0,67;-0,41;-0,2;0,0;-0,56;-0,03;0,0;0,0;-0,02;0,0;-0,04;0,0;
 05.02.2025;11:45;12:00;1,14;0,24;-0,07;0,0;-0,25;0,0;-0,69;-0,15;0,0;0,0;-0,01;0,0;-0,03;0,0;
@@ -612,4 +867,6 @@ export function mock(): void {
     refreshView();
 }
 
-mock();
+if (0) {
+    mock();
+}

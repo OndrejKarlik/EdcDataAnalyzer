@@ -1,18 +1,17 @@
 {
     "name": "edc-report-analyzer",
     "version": "1.0.0",
-    "main": "EdcReportAnalyzer.js",
+    "source": "EdcReportAnalyzer.html",
     "type": "module",
     "scripts": {
-        "test": "echo \"Error: no test specified\" && exit 1",
-        "clean": "tsc --build --clean",
-        "build:ts": "tsc --build",
-        "build:less": "lessc EdcReportAnalyzer.less EdcReportAnalyzer.css",
-        "build": "npm run build:less && npm run build:ts"
+        "build": "npx parcel build --log-level verbose --no-content-hash",
+        "start": "npx parcel       --log-level verbose --open"
+    },
+    "devDependencies": {
+        "@parcel/transformer-less": "^2.14.1",
+        "parcel": "^2.14.1"
     },
     "dependencies": {
-        "http-server": "^14.1.1",
-        "lessc": "^1.0.2",
-        "typescript": "^5.8.2"
+        "chart.js": "^4.4.8"
     }
 }

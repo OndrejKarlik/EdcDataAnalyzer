@@ -1,8 +1,8 @@
 <!doctype html>
 <html>
     <head>
-        <script type="module" src="EdcReportAnalyzer.js"></script>
-        <link rel="stylesheet" href="EdcReportAnalyzer.css" />
+        <script type="module" src="EdcReportAnalyzer.ts"></script>
+        <link rel="stylesheet" href="EdcReportAnalyzer.less" />
 
         <title>Analyze EDC CSV Reports</title>
     </head>
@@ -22,6 +22,20 @@
                     />
                 </div>
                 <div>
+                    <label>Anonymize EANs<input type="checkbox" id="anonymizeEans" /></label>
+
+                    &nbsp;&nbsp;&nbsp; Display units:
+                    <label><input type="radio" name="unit" value="kWh" checked />kWh</label>
+                    <label><input type="radio" name="unit" value="kW" />kW</label>
+                </div>
+                <div>
+                    Group by:
+                    <label><input type="radio" name="group" value="15m" />15 minutes</label>
+                    <label><input type="radio" name="group" value="1h" />1 hour</label>
+                    <label><input type="radio" name="group" value="1d" checked />1 day</label>
+                    <label><input type="radio" name="group" value="1m" />1 month</label>
+                </div>
+                <div id="minFilterParent" style="display: none">
                     <label>
                         Filter by minimum sharing:
                         <span id="minFilter"></span>
@@ -36,13 +50,6 @@
                         <span id="maxFilter"></span>
                     </label>
                     Current threshold: <span id="thresholdFilter"></span>
-                </div>
-                <div>
-                    <label>Hide EANs<input type="checkbox" id="hideEans" /></label>
-
-                    &nbsp;&nbsp;&nbsp; Display units:
-                    <label><input type="radio" name="unit" value="kWh" checked />kWh</label>
-                    <label><input type="radio" name="unit" value="kW" />kW</label>
                 </div>
             </div>
 
@@ -60,6 +67,10 @@
                     <tr>
                         <th>Interval to:</th>
                         <td id="intervalTo"></td>
+                    </tr>
+                    <tr>
+                        <th>Time period:</th>
+                        <td id="intervalLength"></td>
                     </tr>
                 </tbody>
             </table>
@@ -90,19 +101,24 @@
                 happened.
             </div>
 
-            <h1>Sharing in Each Time Interval</h1>
-            <table id="intervals">
-                <thead>
-                    <tr>
-                        <th></th>
-                        <th class="distributionHeader">Distribution</th>
-                        <td class="split"></td>
-                        <th class="consumerHeader">Consumer</th>
-                    </tr>
-                    <tr class="csvHeaderRow"></tr>
-                </thead>
-                <tbody id="csvBody"></tbody>
-            </table>
+            <div id="intervalsContainer">
+                <h1>Sharing in Each Time Interval</h1>
+
+                <div id="intervalsGraph"></div>
+
+                <table id="intervals">
+                    <thead>
+                        <tr>
+                            <th></th>
+                            <th class="distributionHeader">Distribution</th>
+                            <td class="split"></td>
+                            <th class="consumerHeader">Consumer</th>
+                        </tr>
+                        <tr class="csvHeaderRow"></tr>
+                    </thead>
+                    <tbody id="csvBody"></tbody>
+                </table>
+            </div>
         </div>
     </body>
 </html>
