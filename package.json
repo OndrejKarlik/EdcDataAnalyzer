@@ -4,9 +4,9 @@
     "source": "EdcReportAnalyzer.html",
     "type": "module",
     "scripts": {
-        "build": "npx parcel build --log-level verbose --no-scope-hoist --no-content-hash --public-url ./",
-        "start": "npx parcel       --log-level verbose --open",
-        "noHmr": "npx parcel       --log-level verbose --open --no-hmr"
+        "build": "npx parcel build --log-level verbose --dist-dir .dist --no-scope-hoist --no-content-hash --public-url ./",
+        "start": "npx parcel       --log-level verbose --dist-dir .dev --open",
+        "noHmr": "npx parcel       --log-level verbose --dist-dir .dev --open --no-hmr"
     },
     "devDependencies": {
         "@parcel/transformer-less": "^2.14.1",
