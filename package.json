@@ -4,7 +4,7 @@
     "source": "EdcReportAnalyzer.html",
     "type": "module",
     "scripts": {
-        "build": "npx parcel build --log-level verbose --no-content-hash",
+        "build": "npx parcel build --log-level verbose --no-content-hash --public-url ./",
         "start": "npx parcel       --log-level verbose --open"
     },
     "devDependencies": {
