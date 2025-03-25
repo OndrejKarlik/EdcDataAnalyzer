@@ -13,6 +13,7 @@
         "parcel": "^2.14.1"
     },
     "dependencies": {
-        "chart.js": "^4.4.8"
+        "chart.js": "^4.4.8",
+        "nouislider": "^15.8.1"
     }
 }

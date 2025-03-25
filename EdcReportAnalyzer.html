@@ -1,6 +1,7 @@
 <!doctype html>
 <html>
     <head>
+        <link rel="shortcut icon" href="favicon.ico" />
         <script type="module" src="EdcReportAnalyzer.ts"></script>
         <link rel="stylesheet" href="EdcReportAnalyzer.less" />
 
@@ -12,14 +13,28 @@
 
         <div>
             <h1>EDC Report Analyzer</h1>
-            <div>
+            <div id="controls">
                 <div>
-                    <input
-                        type="file"
-                        id="uploadCsv"
-                        name="Select CSV (Standard View)..."
-                        accept="text/csv"
-                    />
+                    <label>
+                        Upload CSV from <a href="https://www.edc-cr.cz/">EDC</a>:&nbsp;&nbsp;&nbsp;<input
+                            type="file"
+                            id="uploadCsv"
+                            name="Select CSV (Standard View)..."
+                            accept="text/csv"
+                        />
+                    </label>
+                    <ul>
+                        <li>
+                            <cite>"Výběr vstupního parametru"</cite> must be
+                            <cite>"Skupina sdílení"</cite> (not <cite>"EAN"</cite>).
+                        </li>
+                        <li><cite>"Typ zobrazení"</cite> parameters must be left to defaults.</li>
+                        <li>
+                            All <cite>"Typ dat"</cite> options are supported, but only
+                            <cite>"Měsíční hodnoty"</cite> is guaranteed to have correct values. Others are
+                            previews and the numbers might be wrong.
+                        </li>
+                    </ul>
                 </div>
                 <div>
                     <label>Anonymize EANs<input type="checkbox" id="anonymizeEans" /></label>
@@ -34,6 +49,10 @@
                     <label><input type="radio" name="group" value="1h" />1 hour</label>
                     <label><input type="radio" name="group" value="1d" checked />1 day</label>
                     <label><input type="radio" name="group" value="1m" />1 month</label>
+                    &nbsp;&nbsp;&nbsp;<label
+                        ><input type="checkbox" id="groupGraph" checked />Show individual EANs in the bar
+                        graph</label
+                    >
                 </div>
                 <div id="minFilterParent" style="display: none">
                     <label>
@@ -51,6 +70,7 @@
                     </label>
                     Current threshold: <span id="thresholdFilter"></span>
                 </div>
+                <div id="range"></div>
             </div>
 
             <h1>Input Data</h1>
@@ -71,6 +91,10 @@
                     <tr>
                         <th>Time period:</th>
                         <td id="intervalLength"></td>
+                    </tr>
+                    <tr>
+                        <th>Currently displayed period:</th>
+                        <td id="intervalFilteredLength"></td>
                     </tr>
                 </tbody>
             </table>

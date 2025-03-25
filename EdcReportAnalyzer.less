@@ -7,6 +7,49 @@ body {
     margin: 0;
 }
 
+div#controls {
+    ul {
+        margin: 0;
+        padding-top: 0;
+    }
+
+    cite {
+        font-family: "Courier New", monospace;
+        font-style: normal;
+        background: rgba(0, 0, 0, 0.2);
+        padding: 0.2em;
+        border-radius: 0.5em;
+        line-height: 1.7em;
+    }
+
+    div#range {
+        margin: 3em 0 8em 3em;
+        height: 10px;
+
+        .noUi-handle {
+            height: 18px;
+            width: 18px;
+            top: -4.5px;
+            right: -9px;
+
+            &::before,
+            &::after {
+                display: none;
+            }
+        }
+
+        .noUi-marker {
+            top: 3px;
+        }
+
+        .noUi-value {
+            transform-origin: center;
+            transform: rotate(-45deg) translateX(-110%);
+            top: -1em;
+        }
+    }
+}
+
 body > div {
     background-color: #f0f0f0;
     padding: 5vh;
