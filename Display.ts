@@ -470,7 +470,7 @@ function displayBarGraph(csv: Csv, groupedIntervals: Interval[]): void {
                 tooltip: {
                     callbacks: {
                         label(tooltipItem): string {
-                            return `${(tooltipItem.raw as number).toFixed(2)} kWh`; 
+                            return `${tooltipItem.dataset.label}: ${(tooltipItem.raw as number).toFixed(2)} kWh`; 
                         },
                     },
                 },
