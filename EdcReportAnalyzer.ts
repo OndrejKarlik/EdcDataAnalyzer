@@ -29,6 +29,7 @@ const rangeDom = document.getElementById("range") as HTMLElement;
 
 type GroupingOptions = "15m" | "1h" | "1d" | "1m";
 type DisplayUnit = "kWh" | "kW";
+type ExtraInBarGraph = "produce" | "consume";
 
 class Settings {
     displayUnit: DisplayUnit = "kWh";
@@ -36,6 +37,7 @@ class Settings {
     filterValue = 0;
     grouping: GroupingOptions = "1d";
     groupGraph = true;
+    graphExtra: ExtraInBarGraph = "produce";
 
     hiddenEans = new Set<string>();
 
@@ -507,6 +509,12 @@ document.querySelectorAll('input[name="group"]').forEach((button) => {
         document.getElementById("minFilterParent")!.style.display = gSettings.useFiltering()
             ? "block"
             : "none";
+        refreshView();
+    });
+});
+document.querySelectorAll('input[name="graphNonShared"]').forEach((button) => {
+    button.addEventListener("change", (e) => {
+        gSettings.graphExtra = (e.target as HTMLInputElement).value as ExtraInBarGraph;
         refreshView();
     });
 });

@@ -440,10 +440,19 @@ function displayBarGraph(csv: Csv, groupedIntervals: Interval[]): void {
             });
         }
     }
-    datasets.push(
-        { label: "Sold to grid (missed sharing)", data: missed, backgroundColor: "red" },
-        { label: "Sold to grid (no demand for sharing)", data: sold, backgroundColor: "gray" },
-    );
+
+    if (gSettings.graphExtra === "produce") {
+        datasets.push(
+            { label: "Sold to grid (missed sharing)", data: missed, backgroundColor: "red" },
+            { label: "Sold to grid (no demand for sharing)", data: sold, backgroundColor: "gray" },
+        );
+    } else {
+        datasets.push({
+            label: "Purchased from grid",
+            data: groupedIntervals.map((i: Interval) => i.consumers.reduce((prev, x) => prev + x.after, 0)),
+            backgroundColor: "lightgray",
+        });
+    }
 
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const chart = new Chart.Chart(canvas, {

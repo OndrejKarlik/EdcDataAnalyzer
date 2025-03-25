@@ -49,10 +49,6 @@
                     <label><input type="radio" name="group" value="1h" />1 hour</label>
                     <label><input type="radio" name="group" value="1d" checked />1 day</label>
                     <label><input type="radio" name="group" value="1m" />1 month</label>
-                    &nbsp;&nbsp;&nbsp;<label
-                        ><input type="checkbox" id="groupGraph" checked />Group all EANs together in the bar
-                        graph</label
-                    >
                 </div>
                 <div id="minFilterParent" style="display: none">
                     <label>
@@ -128,6 +124,17 @@
             <div id="intervalsContainer">
                 <h1>Sharing in Each Time Interval</h1>
 
+                <div>
+                    <label>
+                        <input type="checkbox" id="groupGraph" checked />Group all EANs together in the bar
+                        graph
+                    </label>
+                    &nbsp;&nbsp;&nbsp;Graph total is:
+                    <label
+                        ><input type="radio" name="graphNonShared" value="produce" checked />production</label
+                    >
+                    <label><input type="radio" name="graphNonShared" value="consume" />consumption</label>
+                </div>
                 <div id="intervalsGraph"></div>
 
                 <table id="intervals">
