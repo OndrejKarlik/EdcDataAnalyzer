@@ -402,6 +402,8 @@ function displayComputation(csv: Csv): void {
         const isMore = current - reference > -0.001;
         return `<span style="color: ${isMore ? "green" : "red"}">This allocation shares ${printKWh(Math.abs(current - reference), { nbsp: true })} <strong>${isMore ? "more" : "less"}</strong> than real sharing.</span>`;
     };
+
+    const roundsDom = document.getElementById("rounds") as HTMLInputElement;
     {
         // Computed sharing
         const row = document.createElement("tr");
@@ -437,7 +439,7 @@ function displayComputation(csv: Csv): void {
                 return;
             }
             console.log(allocationPercentages);
-            const results = csv.simulateSharing(allocationPercentages, 5);
+            const results = csv.simulateSharing(allocationPercentages, parseInt(roundsDom.value, 10));
             for (let i = 0; i < allocationSharingOutputs.length; ++i) {
                 allocationSharingOutputs[i].innerHTML =
                     `Simulated sharing: ${printKWh(results.sharingPerEan[i], { nbsp: true })}.<br>`;
@@ -495,7 +497,7 @@ function displayComputation(csv: Csv): void {
             );
 
             csv.optimizeAllocation(
-                parseInt((document.getElementById("rounds") as HTMLInputElement).value, 10),
+                parseInt(roundsDom.value, 10),
                 (document.getElementById("stochastic") as HTMLInputElement).checked
                     ? "random"
                     : "gradientDescend",
