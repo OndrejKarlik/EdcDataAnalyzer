@@ -13,131 +13,97 @@
 
         <div>
             <h1>EDC Report Analyzer</h1>
-            <div id="controls">
-                <div>
-                    <label>
-                        Upload CSV from <a href="https://www.edc-cr.cz/">EDC</a>:&nbsp;&nbsp;&nbsp;<input
-                            type="file"
-                            id="uploadCsv"
-                            name="Select CSV (Standard View)..."
-                            accept="text/csv"
-                        />
-                    </label>
-                    <ul>
-                        <li>
-                            <cite>"Výběr vstupního parametru"</cite> must be
-                            <cite>"Skupina sdílení"</cite> (not <cite>"EAN"</cite>).
-                        </li>
-                        <li><cite>"Typ zobrazení"</cite> parameters must be left to defaults.</li>
-                        <li>
-                            All <cite>"Typ dat"</cite> options are supported, but only
-                            <cite>"Měsíční hodnoty"</cite> is guaranteed to have correct values. Others are
-                            previews and the numbers might be wrong.
-                        </li>
-                    </ul>
+
+            <details open>
+                <summary><h2>Controls</h2></summary>
+                <div id="controls">
+                    <div>
+                        <label>
+                            Upload CSV from <a href="https://www.edc-cr.cz/">EDC</a>:&nbsp;&nbsp;&nbsp;<input
+                                type="file"
+                                id="uploadCsv"
+                                name="Select CSV (Standard View)..."
+                                accept="text/csv"
+                            />
+                        </label>
+                        <ul>
+                            <li>
+                                <cite>"Výběr vstupního parametru"</cite> must be
+                                <cite>"Skupina sdílení"</cite> (not <cite>"EAN"</cite>).
+                            </li>
+                            <li><cite>"Typ zobrazení"</cite> parameters must be left to defaults.</li>
+                            <li>
+                                All <cite>"Typ dat"</cite> options are supported, but only
+                                <cite>"Měsíční hodnoty"</cite> is guaranteed to have correct values. Others
+                                are previews and the numbers might be wrong.
+                            </li>
+                        </ul>
+                    </div>
+                    <div>
+                        <label>Anonymize EANs<input type="checkbox" id="anonymizeEans" /></label>
+
+                        &nbsp;&nbsp;&nbsp; Display units:
+                        <label><input type="radio" name="unit" value="kWh" checked />kWh</label>
+                        <label><input type="radio" name="unit" value="kW" />kW</label>
+                    </div>
+                    <div>
+                        Group by:
+                        <label><input type="radio" name="group" value="15m" />15 minutes</label>
+                        <label><input type="radio" name="group" value="1h" />1 hour</label>
+                        <label><input type="radio" name="group" value="1d" checked />1 day</label>
+                        <label><input type="radio" name="group" value="1m" />1 month</label>
+                    </div>
+                    <div id="minFilterParent" style="display: none">
+                        <label>
+                            Filter by minimum sharing:
+                            <span id="minFilter"></span>
+                            <input
+                                type="range"
+                                min="0"
+                                max="100"
+                                value="99"
+                                id="filterSlider"
+                                style="direction: rtl"
+                            />
+                            <span id="maxFilter"></span>
+                        </label>
+                        Current threshold: <span id="thresholdFilter"></span>
+                    </div>
+                    <div id="range"></div>
                 </div>
-                <div>
-                    <label>Anonymize EANs<input type="checkbox" id="anonymizeEans" /></label>
+            </details>
 
-                    &nbsp;&nbsp;&nbsp; Display units:
-                    <label><input type="radio" name="unit" value="kWh" checked />kWh</label>
-                    <label><input type="radio" name="unit" value="kW" />kW</label>
-                </div>
-                <div>
-                    Group by:
-                    <label><input type="radio" name="group" value="15m" />15 minutes</label>
-                    <label><input type="radio" name="group" value="1h" />1 hour</label>
-                    <label><input type="radio" name="group" value="1d" checked />1 day</label>
-                    <label><input type="radio" name="group" value="1m" />1 month</label>
-                </div>
-                <div id="minFilterParent" style="display: none">
-                    <label>
-                        Filter by minimum sharing:
-                        <span id="minFilter"></span>
-                        <input
-                            type="range"
-                            min="0"
-                            max="100"
-                            value="99"
-                            id="filterSlider"
-                            style="direction: rtl"
-                        />
-                        <span id="maxFilter"></span>
-                    </label>
-                    Current threshold: <span id="thresholdFilter"></span>
-                </div>
-                <div id="range"></div>
-            </div>
+            <details open>
+                <summary><h2>Input Data</h2></summary>
+                <table id="csvMeta">
+                    <tbody>
+                        <tr>
+                            <th>File Name:</th>
+                            <td id="filename"></td>
+                        </tr>
+                        <tr>
+                            <th>Interval from:</th>
+                            <td id="intervalFrom"></td>
+                        </tr>
+                        <tr>
+                            <th>Interval to:</th>
+                            <td id="intervalTo"></td>
+                        </tr>
+                        <tr>
+                            <th>Time period:</th>
+                            <td id="intervalLength"></td>
+                        </tr>
+                        <tr>
+                            <th>Currently displayed period:</th>
+                            <td id="intervalFilteredLength"></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </details>
 
-            <h1>Input Data</h1>
-            <table id="csvMeta">
-                <tbody>
-                    <tr>
-                        <th>File Name:</th>
-                        <td id="filename"></td>
-                    </tr>
-                    <tr>
-                        <th>Interval from:</th>
-                        <td id="intervalFrom"></td>
-                    </tr>
-                    <tr>
-                        <th>Interval to:</th>
-                        <td id="intervalTo"></td>
-                    </tr>
-                    <tr>
-                        <th>Time period:</th>
-                        <td id="intervalLength"></td>
-                    </tr>
-                    <tr>
-                        <th>Currently displayed period:</th>
-                        <td id="intervalFilteredLength"></td>
-                    </tr>
-                </tbody>
-            </table>
-
-            <h1>Summary</h1>
-            <table id="csv">
-                <thead>
-                    <tr>
-                        <th></th>
-                        <th class="distributionHeader">Distribution</th>
-                        <td class="split"></td>
-                        <th class="consumerHeader">Consumer</th>
-                    </tr>
-                    <tr class="csvHeaderRow"></tr>
-                </thead>
-                <tbody id="csvBody"></tbody>
-            </table>
-            <div>
-                "Missed" is an estimation of how much sharing was missed due to wrongly set allocation keys.
-                If the distribution EANs still have some kWh-s left after sharing, and some consumer EAN(s)
-                did not achieve 0 kWh-s, it means there was power left for sharing which was not allocated due
-                to wrong allocation keys.
-            </div>
-            <div>
-                Unfortunately this metric is in no way perfect, because the data are provided with only 2
-                decimal places and the rounding errors accumulate. Often there is 0.01 kWh left in
-                distribution EAN and 0.01 kWh left in a consumer EAN and we have no way of knowing what really
-                happened.
-            </div>
-
-            <div id="intervalsContainer">
-                <h1>Sharing in Each Time Interval</h1>
-
-                <div>
-                    <label>
-                        <input type="checkbox" id="groupGraph" checked />Group all EANs together in the bar
-                        graph
-                    </label>
-                    &nbsp;&nbsp;&nbsp;Graph total is:
-                    <label
-                        ><input type="radio" name="graphNonShared" value="produce" checked />production</label
-                    >
-                    <label><input type="radio" name="graphNonShared" value="consume" />consumption</label>
-                </div>
-                <div id="intervalsGraph"></div>
-
-                <table id="intervals">
+            <details open>
+                <summary><h2>Summary</h2></summary>
+                <table id="csv">
                     <thead>
                         <tr>
                             <th></th>
@@ -149,7 +115,141 @@
                     </thead>
                     <tbody id="csvBody"></tbody>
                 </table>
-            </div>
+                <div>
+                    "Missed" is an estimation of how much sharing was missed due to wrongly set allocation
+                    keys. If the distribution EANs still have some kWh-s left after sharing, and some consumer
+                    EAN(s) did not achieve 0 kWh-s, it means there was power left for sharing which was not
+                    allocated due to wrong allocation keys.
+                </div>
+                <div>
+                    Unfortunately this metric is in no way perfect, because the data are provided with only 2
+                    decimal places and the rounding errors accumulate. Often there is 0.01 kWh left in
+                    distribution EAN and 0.01 kWh left in a consumer EAN and we have no way of knowing what
+                    really happened.
+                </div>
+            </details>
+
+            <details open>
+                <summary><h2>Simulation</h2></summary>
+                <ol>
+                    <li>
+                        <strong>Simulate sharing</strong>: simulates sharing with user-provided coefficients.
+                        This tries to replicate the EDC algorithm as close as possible. If you run it with
+                        actual data and actual allocation percentages, it should achieve exactly the same
+                        results (down to 0.01 kWh). You can try different sharing coefficients to see how they
+                        influence the sharing.
+                    </li>
+                    <li>
+                        <strong>Find optimal weights</strong>: Automatically finds the optimal weights for
+                        sharing to maximize sum of all sharing for given data. This comes with some caveats:
+                        <ul>
+                            <li>
+                                This uses a randomized algorithm, so it is not guaranteed to find the best
+                                solution - but in practice it seems to get really close.
+                            </li>
+                            <li>
+                                It is also computationally intensive and can take several seconds to finish.
+                            </li>
+                            <li>
+                                Obviously this only optimizes sharing in the PAST, not in the FUTURE (<a
+                                    href="https://en.wikipedia.org/wiki/Backtesting"
+                                    >backtesting</a
+                                >). The computed weights will not work optimally if production/consumption
+                                patterns change in the future.
+                            </li>
+                        </ul>
+                        There are 2 parameters to set: effort per iteration and number of iterations. Default
+                        values seem to work well, but you can experiment with changing them. Higher values
+                        will take longer but might give better result.
+                    </li>
+                </ol>
+                <p></p>
+                <div>
+                    <label title="How many rounds does your sharing group use ('Sdílení s opakováním')."
+                        >EDC Group Sharing Rounds:<input
+                            id="rounds"
+                            type="number"
+                            min="1"
+                            max="100"
+                            value="5"
+                    /></label>
+                </div>
+                <div>
+                    Optimization algorithm settings:
+                    <label
+                        title="How many failed attempts are allowed until single iteration finishes. Higher numbers give better results but take longer."
+                    >
+                        &nbsp;&nbsp;&nbsp;Effort per iteration:<input
+                            id="maxFails"
+                            type="number"
+                            min="1"
+                            max="1000000"
+                            value="200"
+                        />
+                    </label>
+                    <label
+                        title="How many times to run the algorithm. Higher numbers give better results but take longer."
+                    >
+                        Number of iterations:<input
+                            id="restarts"
+                            type="number"
+                            min="1"
+                            max="1000"
+                            value="20"
+                        />
+                    </label>
+                    <span style="display: none">
+                        Method:
+                        <label>
+                            <input
+                                id="stochastic"
+                                type="radio"
+                                name="method"
+                                value="stochastic"
+                                checked
+                            />Stochastic
+                        </label>
+                        <label><input type="radio" name="method" value="gradient" />Gradient descend</label>
+                    </span>
+                </div>
+                <table id="computation">
+                    <thead>
+                        <tr class="csvHeaderRow"></tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </details>
+
+            <details open>
+                <summary><h2>Sharing in Each Time Interval</h2></summary>
+                <div id="intervalsContainer">
+                    <div>
+                        <label>
+                            <input type="checkbox" id="groupGraph" checked />Group all EANs together in the
+                            bar graph
+                        </label>
+                        &nbsp;&nbsp;&nbsp;Graph total is:
+                        <label>
+                            <input type="radio" name="graphNonShared" value="produce" checked />production
+                        </label>
+                        <label><input type="radio" name="graphNonShared" value="consume" />consumption</label>
+                    </div>
+                    <div id="intervalsGraph"></div>
+
+                    <table id="intervals">
+                        <thead>
+                            <tr>
+                                <th></th>
+                                <th class="distributionHeader">Distribution</th>
+                                <td class="split"></td>
+                                <th class="consumerHeader">Consumer</th>
+                            </tr>
+                            <tr class="csvHeaderRow"></tr>
+                        </thead>
+                        <tbody id="csvBody"></tbody>
+                    </table>
+                </div>
+            </details>
         </div>
     </body>
 </html>

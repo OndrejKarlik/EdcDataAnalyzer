@@ -11,6 +11,10 @@ function last<T>(container: T[]): T {
     return container[container.length - 1];
 }
 
+export function sum(container: number[]): number {
+    return container.reduce((acc, val) => acc + val, 0);
+}
+
 export function assert(condition: boolean, ...loggingArgs: unknown[]): asserts condition {
     if (!condition) {
         const errorMsg = `Assert failed: ${loggingArgs.toString()}`;
@@ -29,7 +33,7 @@ const rangeDom = document.getElementById("range") as HTMLElement;
 
 type GroupingOptions = "15m" | "1h" | "1d" | "1m";
 type DisplayUnit = "kWh" | "kW";
-type ExtraInBarGraph = "produce" | "consume";
+export type ProduceConsume = "produce" | "consume";
 
 class Settings {
     displayUnit: DisplayUnit = "kWh";
@@ -37,7 +41,7 @@ class Settings {
     filterValue = 0;
     grouping: GroupingOptions = "1d";
     groupGraph = true;
-    graphExtra: ExtraInBarGraph = "produce";
+    graphExtra: ProduceConsume = "produce";
 
     hiddenEans = new Set<string>();
 
@@ -132,6 +136,24 @@ function accumulateInterval(to: Interval, from: Interval): void {
     to.errors.push(...from.errors);
 }
 
+export interface OptimizedAllocation {
+    weights: number[];
+    sharing: number[];
+}
+export interface SharingSimulationResult {
+    sharingTotal: number;
+    sharingPerEan: number[];
+    sharingPerRoundPerEan: number[][]; // array[iterations][eans]
+}
+type OptimizationAlgorithm = "gradientDescend" | "random";
+
+function gaussianRandom(mean = 0, stdev = 1): number {
+    const u = 1 - Math.random(); // Converting [0,1) to (0,1]
+    const v = Math.random();
+    const z = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+    // Transform to the desired mean and standard deviation:
+    return z * stdev + mean;
+}
 export class Csv {
     distributionEans: Ean[] = [];
     consumerEans: Ean[] = [];
@@ -141,6 +163,9 @@ export class Csv {
     dateTo: Date;
 
     intervals: Interval[] = [];
+
+    // Used for optimizing sharing
+    // readonly #flatConsumed: Uint32Array;
 
     constructor(filename: string, intervals: Interval[], distributionEans: Ean[], consumerEans: Ean[]) {
         this.filename = filename;
@@ -187,6 +212,15 @@ export class Csv {
         }
         this.distributionEans = newDistributionEans;
         this.consumerEans = newConsumerEans;
+
+        // this.#flatConsumed = new Uint32Array(this.intervals.length * this.consumerEans.length);
+        // for (let i = 0; i < this.intervals.length; ++i) {
+        //    for (let j = 0; j < this.consumerEans.length; ++j) {
+        //        this.#flatConsumed[i * this.consumerEans.length + j] = Math.round(
+        //            this.intervals[i].consumers[j].before * 100,
+        //        );
+        //    }
+        // }
     }
 
     getGroupedIntervals(grouping: GroupingOptions, dateFrom: Date, dateTo: Date): Interval[] {
@@ -239,6 +273,224 @@ export class Csv {
     getNumDays(): number {
         const timeDiff = this.dateTo.getTime() - this.dateFrom.getTime();
         return Math.ceil(timeDiff / (1000 * 3600 * 24));
+    }
+
+    // TODO: filtering of time intervals?
+    simulateSharing(allocations: number[], iterations: number): SharingSimulationResult {
+        // const startTime = Date.now();
+        assert(sum(allocations) <= 100, "Allocations are over 100", allocations, sum(allocations));
+        assert(this.distributionEans.length === 1);
+
+        // We will run everything in integers multiplier by 100 to get fixed point 2 decimal places exact arithmetic
+
+        const resultDetailed = [] as number[][];
+        for (let i = 0; i < iterations; ++i) {
+            resultDetailed.push(Array<number>(allocations.length).fill(0));
+        }
+
+        for (const interval of this.intervals) {
+            // To fixed point. Note that the rounding is necessary even here. 0.07*100 = 7.000000000000001
+            let toShare = Math.round(interval.distributions[0].before * 100);
+            const consumed: number[] = interval.consumers.map((c) => Math.round(c.before * 100));
+
+            for (let iteration = 0; iteration < iterations; ++iteration) {
+                const energyThisRound = toShare;
+                for (let i = 0; i < consumed.length; ++i) {
+                    // Allocations are in %, so we need to divide by 100. The EDC manual explicitly says they truncate down here
+                    const shared = Math.min(
+                        consumed[i],
+                        Math.trunc(energyThisRound * (allocations[i] / 100)),
+                    );
+                    consumed[i] -= shared;
+                    toShare -= shared;
+                    resultDetailed[iteration][i] += shared;
+                    assert(shared >= 0);
+                    assert(toShare >= 0);
+                    assert(consumed[i] >= 0);
+                }
+            }
+        }
+        // Go back from fixed point to floats
+        const resultEan = Array<number>(allocations.length).fill(0);
+        let sharingTotal = 0;
+        for (let i = 0; i < iterations; ++i) {
+            for (let j = 0; j < allocations.length; ++j) {
+                resultDetailed[i][j] /= 100;
+                resultEan[j] += resultDetailed[i][j];
+                sharingTotal += resultDetailed[i][j];
+            }
+        }
+        // console.log("simulateSharing TOTAL took ", Date.now() - startTime, " ms");
+        return { sharingTotal, sharingPerEan: resultEan, sharingPerRoundPerEan: resultDetailed };
+    }
+
+    // Fast version computing only final sharing
+    simulateSharingFast(allocations: number[], iterations: number): number {
+        // const startTime = Date.now();
+        assert(sum(allocations) <= 100, "Allocations are over 100", allocations, sum(allocations));
+        assert(this.distributionEans.length === 1);
+
+        const allocationsFraction = allocations.map((i) => i / 100);
+        // const allocationsFraction = new Uint32Array(allocations.length);
+        // for (let i = 0; i < allocations.length; ++i) {
+        //    allocationsFraction[i] = allocations[i] / 100;
+        // }
+
+        // We will run everything in integers multiplier by 100 to get fixed point 2 decimal places exact arithmetic
+
+        // const flatConsumed = new Uint32Array(this.#flatConsumed);
+
+        let sharingTotal = 0;
+        for (const interval of this.intervals) {
+            // To fixed point. Note that the rounding is necessary even here. 0.07*100 = 7.000000000000001
+            let toShare = Math.round(interval.distributions[0].before * 100);
+
+            const consumed = interval.consumers.map((c) => Math.round(c.before * 100));
+
+            for (let iteration = 0; iteration < iterations; ++iteration) {
+                const energyThisRound = toShare;
+                for (let i = 0; i < consumed.length; ++i) {
+                    // Allocations are in %, so we need to divide by 100. The EDC manual explicitly says they truncate down here
+                    const shared = Math.min(
+                        consumed[i],
+                        Math.trunc(energyThisRound * allocationsFraction[i]),
+                    );
+                    consumed[i] -= shared;
+                    toShare -= shared;
+                    sharingTotal += shared;
+                    // console.log(shared);
+                }
+            }
+        }
+        return sharingTotal / 100;
+    }
+
+    // progressCallback is called at the end with final value
+    optimizeAllocation(
+        sharingRounds: number,
+        algorithm: OptimizationAlgorithm,
+        maxFails: number,
+        restarts: number,
+        progressCallback: (resultSoFar: OptimizedAllocation, iteration: number) => void,
+    ): void {
+        const startTime = Date.now();
+        let result = this.#optimizeAllocationIteration(sharingRounds, algorithm, maxFails);
+
+        let progress = 0;
+        const iterate = (): void => {
+            ++progress;
+            const newResult = this.#optimizeAllocationIteration(sharingRounds, algorithm, maxFails);
+            console.log(`Restart ${progress} Achieved sharing ${sum(result.sharing)}`);
+            if (sum(newResult.sharing) > sum(result.sharing)) {
+                result = newResult;
+            }
+            progressCallback(result, progress);
+            if (progress < restarts) {
+                setTimeout(iterate, 0);
+            } else {
+                console.log("optimizeAllocation TOTAL took ", Date.now() - startTime, " ms");
+            }
+        };
+        setTimeout(iterate, 0);
+    }
+
+    #optimizeAllocationIteration(
+        sharingRounds: number,
+        algorithm: OptimizationAlgorithm,
+        maxFails: number,
+    ): OptimizedAllocation {
+        const clampTo2 = (num: number): number => Math.trunc(num * 100) / 100;
+
+        const timeStart = Date.now();
+        let weights = Array<number>(this.consumerEans.length);
+        for (let i = 0; i < weights.length; ++i) {
+            weights[i] = Math.random() * 100;
+        }
+        const sumInitial = sum(weights);
+        for (let i = 0; i < weights.length; ++i) {
+            weights[i] /= sumInitial / 99.99;
+        }
+        // console.log("initial random weights", weights);
+        const bumpConsumer = (index: number, amount: number): number[] => {
+            const result = structuredClone(weights);
+            const eligibleUp = Math.min(amount, 100 - result[index]);
+            let eligibleDown = 0;
+            const desiredDownIndividual = eligibleUp / (result.length - 1);
+            for (let i = 0; i < result.length; ++i) {
+                if (i !== index) {
+                    eligibleDown += Math.min(desiredDownIndividual, result[i]);
+                }
+            }
+            const change = Math.min(eligibleUp, eligibleDown);
+            assert(change > 0);
+            result[index] = clampTo2(result[index] + change);
+            for (let i = 0; i < result.length; ++i) {
+                if (i !== index) {
+                    result[i] = Math.max(0, clampTo2(result[i] - desiredDownIndividual));
+                }
+            }
+            // Finally, add the unallocated amount to the consumer which we are bumping:
+            result[index] = clampTo2(result[index] + 99.99 - sum(result));
+            return result;
+        };
+
+        let bestSharing = this.simulateSharingFast(weights, sharingRounds);
+        let failedInRow = 0;
+        let iterations = 0;
+        let bestWeights = structuredClone(weights);
+        while (failedInRow < maxFails) {
+            ++iterations;
+
+            let thisTotal = 0;
+            if (algorithm === "gradientDescend") {
+                const STEP = 1;
+                const differences = [] as number[];
+                for (let i = 0; i < this.consumerEans.length; ++i) {
+                    const result = this.simulateSharingFast(bumpConsumer(i, STEP), sharingRounds);
+                    differences.push(result - bestSharing);
+                }
+                // console.log(differences);
+                let max = 0;
+                for (let i = 1; i < differences.length; i++) {
+                    if (differences[i] > differences[max]) {
+                        max = i;
+                    }
+                }
+                thisTotal = this.simulateSharingFast(weights, sharingRounds);
+            } else {
+                const randomIndex = Math.trunc(Math.random() * this.consumerEans.length);
+                const randomAmount = Math.abs(gaussianRandom(0, 5));
+                // console.log("random amount", randomAmount);
+                const proposedWeights = bumpConsumer(randomIndex, randomAmount);
+                const proposedResult = this.simulateSharingFast(proposedWeights, sharingRounds);
+                if (proposedResult > bestSharing) {
+                    weights = proposedWeights;
+                    // console.log(proposedWeights);
+                    thisTotal = proposedResult;
+                }
+            }
+
+            if (thisTotal <= bestSharing) {
+                ++failedInRow;
+            } else {
+                // console.log(thisTotal);
+                bestSharing = thisTotal;
+                bestWeights = structuredClone(weights);
+                failedInRow = 0;
+            }
+        }
+        const final = this.simulateSharing(bestWeights, sharingRounds);
+        assert(
+            Math.abs(final.sharingTotal - this.simulateSharingFast(bestWeights, sharingRounds)) < 0.01,
+            final.sharingTotal,
+            this.simulateSharingFast(bestWeights, sharingRounds),
+        );
+        console.log(
+            `Optimize Weights iteration took ${iterations} iterations and ${Date.now() - timeStart} ms. Sharing achieved: ${final.sharingTotal}`,
+        );
+        // console.log(`Sum weights ${bestWeights.reduce((w, a) => w + a, 0)}`);
+        assert(bestWeights.reduce((w, a) => w + a, 0) <= 100);
+        return { weights: bestWeights, sharing: final.sharingPerEan };
     }
 }
 
@@ -388,7 +640,7 @@ function parseCsv(csv: string, filename: string): Csv {
         const anyOverThreshold = (measurements: Measurement[]): boolean => {
             for (const measurement of measurements) {
                 // There are plenty of intervals where distribution before and after are both 0.01 and no sharing is performed...:
-                if (measurement.after > 0.01) {
+                if (measurement.after > 0) {
                     return true;
                 }
             }
@@ -514,7 +766,7 @@ document.querySelectorAll('input[name="group"]').forEach((button) => {
 });
 document.querySelectorAll('input[name="graphNonShared"]').forEach((button) => {
     button.addEventListener("change", (e) => {
-        gSettings.graphExtra = (e.target as HTMLInputElement).value as ExtraInBarGraph;
+        gSettings.graphExtra = (e.target as HTMLInputElement).value as ProduceConsume;
         refreshView();
     });
 });
@@ -540,12 +792,12 @@ export function mock(): void {
 06.02.2025;13:00;13:15;1,02;0,04;-0,24;-0,07;-0,63;-0,28;-0,12;0,0;0,0;0,0;0,0;0,0;-0,34;0,0;
 07.02.2025;13:15;13:30;1,0;0,33;-0,26;-0,01;-0,11;0,0;-0,11;0,0;0,0;0,0;-0,02;0,0;-0,18;0,0;
 08.02.2025;13:30;13:45;0,93;0,29;-0,21;0,0;-0,12;0,0;-0,11;0,0;0,0;0,0;-0,02;0,0;-0,18;0,0;
-09.02.2025;13:45;14:00;0,86;0,45;-0,11;0,0;-0,09;0,0;-0,11;0,0;0,0;0,0;-0,01;0,0;-0,09;0,0;
+09.02.2025;13:45;14:00;0,86;0,45;-0,11;0,0;-0,09;0,0;-0,11;0,0;-1,0;-1,0;-0,01;0,0;-0,09;0,0;
 `,
         "TESTING DUMMY",
     );
 }
 
-if (0) {
+if (1) {
     mock();
 }

@@ -5,6 +5,20 @@
 body {
     padding: 0;
     margin: 0;
+    background-color: #f0f0f0;
+}
+
+details {
+    margin: 1em;
+
+    > summary > h2 {
+        display: inline;
+        cursor: pointer;
+    }
+
+    &[open] {
+        margin-bottom: 4em;
+    }
 }
 
 div#controls {
@@ -51,7 +65,6 @@ div#controls {
 }
 
 body > div {
-    background-color: #f0f0f0;
     padding: 5vh;
     font-size: 80%;
 }
@@ -71,6 +84,7 @@ table {
     overflow: hidden;
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
     background-color: #ffffff;
+    width: 100%;
 }
 
 th,
@@ -106,10 +120,6 @@ table#csv {
         height: auto;
         margin: auto;
     }
-}
-
-table {
-    width: 100%;
 }
 
 td.split {
@@ -162,4 +172,26 @@ th.consumer {
 tr.csvHeaderRow input {
     width: 100%;
     min-width: 0;
+}
+
+table#computation {
+    input {
+        text-align: right;
+    }
+
+    tr.optimize td,
+    tr.compute td {
+        text-align: center;
+
+        input#submitAllocation {
+            width: 50%;
+        }
+
+        text-align: center;
+
+        input[type="number"] {
+            width: 4em;
+            text-align: right;
+        }
+    }
 }
