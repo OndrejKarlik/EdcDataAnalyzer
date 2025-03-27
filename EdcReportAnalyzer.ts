@@ -798,6 +798,6 @@ export function mock(): void {
     );
 }
 
-if (1) {
+if (0) {
     mock();
 }
