@@ -4,9 +4,12 @@
     "source": "EdcReportAnalyzer.html",
     "type": "module",
     "scripts": {
-        "build": "npx parcel build --log-level verbose --dist-dir dist --no-scope-hoist --no-content-hash --public-url ./",
-        "start": "npx parcel       --log-level verbose --dist-dir .dev --open",
-        "noHmr": "npx parcel       --log-level verbose --dist-dir .dev --open --no-hmr"
+        "@comment1": "no-scope-hoist is a workaround to bug in parcel making the code fail in run time.",
+        "@comment2": "HMR fails when --log-level verbose is used, so 'info' is used as a workaround",
+        "@comment3": "tsc is invoked only to fail the build if there is an error in types. Parsec does not need it",
+        "build": "tsc --build . --noEmit && npx parcel build --log-level verbose --dist-dir dist --no-scope-hoist --no-content-hash --public-url ./",
+        "start": "                          npx parcel       --log-level info    --dist-dir .dev --open",
+        "noHmr": "                          npx parcel       --log-level verbose --dist-dir .dev --open --no-hmr"
     },
     "devDependencies": {
         "@parcel/transformer-less": "^2.14.1",

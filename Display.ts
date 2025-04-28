@@ -1,9 +1,16 @@
 /* eslint-disable @typescript-eslint/non-nullable-type-assertion-style */
 /* eslint-disable @typescript-eslint/no-unsafe-type-assertion */
 
-import { gSettings, refreshView, assert, sum } from "./EdcReportAnalyzer.js";
+import { last, gSettings, refreshView, assert, sum, accumulateInterval } from "./EdcReportAnalyzer.js";
 // eslint-disable-next-line no-duplicate-imports
-import type { Csv, Interval, Ean, Measurement, OptimizedAllocation } from "./EdcReportAnalyzer.js";
+import type {
+    GroupingOptions,
+    Csv,
+    Interval,
+    Ean,
+    Measurement,
+    OptimizedAllocation,
+} from "./EdcReportAnalyzer.js";
 import * as Chart from "chart.js/auto";
 
 type Rgb = [number, number, number];
@@ -123,22 +130,22 @@ function setupHeader(table: HTMLTableElement, csv: Csv, editableNames: boolean):
 }
 
 export function printOnlyDate(date: Date): string {
-    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 export function printDate(date: Date): string {
-    return `${printOnlyDate(date)} ${String(date.getUTCHours()).padStart(2, "0")}:${String(date.getUTCMinutes()).padStart(2, "0")}`;
+    return `${printOnlyDate(date)} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
-function printGroupedDate(date: Date, useNbsp = true): string {
+function printGroupedDate(date: Date, grouping: GroupingOptions, useNbsp = true): string {
     const nbsp = useNbsp ? "&nbsp;" : " ";
-    switch (gSettings.grouping) {
+    switch (grouping) {
         case "15m":
-            return `${printDate(date)}${nbsp}-${nbsp}${String(date.getUTCHours()).padStart(2, "0")}:${String(date.getUTCMinutes() + 14).padStart(2, "0")}`;
+            return `${printDate(date)}${nbsp}-${nbsp}${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes() + 14).padStart(2, "0")}`;
         case "1h":
-            return `${printOnlyDate(date)} ${String(date.getUTCHours()).padStart(2, "0")}:${String(date.getUTCMinutes()).padStart(2, "0")}`;
+            return `${printOnlyDate(date)} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
         case "1d":
             return printOnlyDate(date);
         case "1m":
-            return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+            return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
         default:
             throw Error();
     }
@@ -160,8 +167,13 @@ export function printKWh(input: number, options?: PrintKWhOptions): string {
     assert(!isNaN(input), "NaN in printKWh!");
     const alwaysKWh = options?.alwaysKwh ?? false;
     const nsbsp = (options?.nbsp ?? false) ? "&nbsp;" : " ";
-    if (gSettings.displayUnit === "kW" && !alwaysKWh) {
-        return `${(input * 4).toFixed(2)}${nsbsp}kW`;
+    if (
+        gSettings.displayUnit === "kW" &&
+        !alwaysKWh &&
+        (gSettings.grouping === "15m" || gSettings.grouping === "1h")
+    ) {
+        const multiplier = gSettings.grouping === "15m" ? 4 : 1;
+        return `${(input * multiplier).toFixed(2)}${nsbsp}kW`;
     } else {
         return `${input.toFixed(2)}${nsbsp}kWh`;
     }
@@ -171,9 +183,10 @@ function displayInputData(csv: Csv): void {
     document.getElementById("filename")!.innerText = csv.filename;
     document.getElementById("intervalFrom")!.innerText = printDate(csv.dateFrom);
     document.getElementById("intervalTo")!.innerText = printDate(csv.dateTo);
-    document.getElementById("intervalLength")!.innerText = `${csv.getNumDays()} days`;
+    document.getElementById("intervalLength")!.innerText = `${csv.getNumDays()} dnů`;
+    console.log(gSettings.maxDayFilter, gSettings.minDayFilter);
     document.getElementById("intervalFilteredLength")!.innerText =
-        `${gSettings.maxDayFilter - gSettings.minDayFilter + 1} days`;
+        `${gSettings.maxDayFilter - gSettings.minDayFilter + 1} dnů`;
 }
 
 function displaySummary(csv: Csv, groupedIntervals: Interval[]): void {
@@ -241,20 +254,20 @@ function displaySummary(csv: Csv, groupedIntervals: Interval[]): void {
     };
 
     const printOptions = { alwaysKwh: true, nbsp: true };
-    makeRow("Original (without&nbsp;sharing) [kWh]:", GRAY, (eanStats: EanStats) =>
+    makeRow("Naměřená data (před&nbsp;sdílením) [kWh]:", GRAY, (eanStats: EanStats) =>
         printKWh(eanStats.originalBalance, printOptions),
     );
-    makeRow("Adjusted (with&nbsp;sharing) [kWh]:", GRAY, (eanStats: EanStats) =>
+    makeRow("Ponížená data (po&nbsp;sdílení) [kWh]:", GRAY, (eanStats: EanStats) =>
         printKWh(eanStats.adjustedBalance, printOptions),
     );
-    makeRow("Shared [kWh]:", GREEN, (eanStats: EanStats) => printKWh(eanStats.shared(), printOptions));
-    makeRow("Missed [kWh]:", RED, (eanStats: EanStats) =>
+    makeRow("Sdílení [kWh]:", GREEN, (eanStats: EanStats) => printKWh(eanStats.shared(), printOptions));
+    makeRow("Ušlá příležitost [kWh]:", RED, (eanStats: EanStats) =>
         printKWh(eanStats.missedDueToAllocation, printOptions),
     );
 
     const graphRow = document.createElement("tr");
     const graphTh = document.createElement("th");
-    graphTh.innerHTML = "Graphs:";
+    graphTh.innerHTML = "Grafy:";
     graphRow.appendChild(graphTh);
 
     const makeChart = (cell: HTMLElement, ean: Ean, eanStats: EanStats): void => {
@@ -269,7 +282,11 @@ function displaySummary(csv: Csv, groupedIntervals: Interval[]): void {
             const graph = new Chart.Chart(canvas, {
                 type: "pie",
                 data: {
-                    labels: ["Shared", "Missed", "Rest"],
+                    labels: [
+                        "Sdíleno",
+                        "Ušlá příležitost\n(prodáno/nakoupeno)",
+                        "Zbytek\n(prodáno/nakoupeno)",
+                    ],
                     datasets: [
                         {
                             label: "%",
@@ -355,7 +372,7 @@ function displayComputation(csv: Csv): void {
         // Inputs
         const row = document.createElement("tr");
         const rowHeader = document.createElement("th");
-        rowHeader.innerHTML = "Allocation to each EAN:";
+        rowHeader.innerHTML = "Alokace odběratelům:";
         row.appendChild(rowHeader);
 
         for (const ean of csv.consumerEans) {
@@ -400,7 +417,7 @@ function displayComputation(csv: Csv): void {
 
     const makeComparison = (current: number, reference: number): string => {
         const isMore = current - reference > -0.001;
-        return `<span style="color: ${isMore ? "green" : "red"}">This allocation shares ${printKWh(Math.abs(current - reference), { nbsp: true })} <strong>${isMore ? "more" : "less"}</strong> than real sharing.</span>`;
+        return `<span style="color: ${isMore ? "green" : "red"}">Tato alokace sdílí ${printKWh(Math.abs(current - reference), { nbsp: true })} <strong>${isMore ? "více" : "méně"}</strong> než skutečné sdílení.</span>`;
     };
 
     const roundsDom = document.getElementById("rounds") as HTMLInputElement;
@@ -409,11 +426,11 @@ function displayComputation(csv: Csv): void {
         const row = document.createElement("tr");
         row.classList.add("compute");
         const rowHeader = document.createElement("th");
-        rowHeader.title = "Input any weights you want and run sharing simulation on them";
+        rowHeader.title = "Zadejte váhy pro které simulace spočítá sdílení";
         row.appendChild(rowHeader);
         const simulateButton = document.createElement("input");
         simulateButton.type = "button";
-        simulateButton.value = "Simulate sharing";
+        simulateButton.value = "Simulovat sdílení";
         rowHeader.appendChild(simulateButton);
 
         const allocationSharingOutputs = [] as HTMLElement[];
@@ -425,40 +442,40 @@ function displayComputation(csv: Csv): void {
 
         simulateButton.addEventListener("click", () => {
             if (csv.distributionEans.length > 1) {
-                alert("Sorry, this feature is not yet implemented for multiple distribution EANs.");
+                alert("Bohužel, tato funkce zatím nefunguje pro víc než 1 výrobní zdroj.");
                 return;
             }
             const allocationPercentages = allocationInputs.map((i) => parseFloat(i.value));
             if (allocationPercentages.some((i) => isNaN(i))) {
-                alert("Please enter value allocation % for all sources");
+                alert("Prosím zadejte alokaci pro všechny EANy.");
                 return;
             }
             const sumAllocations = sum(allocationPercentages);
             if (sumAllocations > 100) {
-                alert(`Sum of allocation % is ${sumAllocations}. It must be less or equal to 100!`);
+                alert(`Součet alokací je přes 100% (aktuálně ${sumAllocations}%)`);
                 return;
             }
             console.log(allocationPercentages);
             const results = csv.simulateSharing(allocationPercentages, parseInt(roundsDom.value, 10));
             for (let i = 0; i < allocationSharingOutputs.length; ++i) {
                 allocationSharingOutputs[i].innerHTML =
-                    `Simulated sharing: ${printKWh(results.sharingPerEan[i], { nbsp: true })}.<br>`;
+                    `Simulované sdílení: ${printKWh(results.sharingPerEan[i], { nbsp: true })}.<br>`;
                 allocationSharingOutputs[i].innerHTML += makeComparison(
                     results.sharingPerEan[i],
                     sumShared[i],
                 );
 
-                allocationSharingOutputs[i].title = "Sharing per round:\n";
+                allocationSharingOutputs[i].title = "Sdílení v každém kole opakování:\n";
                 for (let round = 0; round < results.sharingPerRoundPerEan.length; ++round) {
                     allocationSharingOutputs[i].title +=
                         `${round + 1}: ${printKWh(results.sharingPerRoundPerEan[round][i])} (${((100 * results.sharingPerRoundPerEan[round][i]) / Math.max(0.0000001, results.sharingPerEan[i])).toFixed(2)} %)\n`;
                 }
             }
-            let sumText = `Simulated sharing: ${printKWh(results.sharingTotal, { nbsp: true })}<br>`;
-            sumText += `Missed due to allocation: ${printKWh(totalShareable - results.sharingTotal, { nbsp: true })}<br>`;
+            let sumText = `Simulované sdílení: ${printKWh(results.sharingTotal, { nbsp: true })}<br>`;
+            sumText += `Ušlá příležitost: ${printKWh(totalShareable - results.sharingTotal, { nbsp: true })}<br>`;
             sumText += makeComparison(results.sharingTotal, totalShared);
 
-            lastCell.title = `Sharing per round:\n`;
+            lastCell.title = `Sdílení v každém kole opakování:\n`;
             for (let round = 0; round < results.sharingPerRoundPerEan.length; ++round) {
                 lastCell.title += `${round + 1}: ${printKWh(sum(results.sharingPerRoundPerEan[round]))}\n`;
             }
@@ -473,10 +490,10 @@ function displayComputation(csv: Csv): void {
         const row = document.createElement("tr");
         row.classList.add("optimize");
         const rowHeader = document.createElement("th");
-        rowHeader.title = "Let the algorithm find best weights automatically.";
+        rowHeader.title = "Algoritmus najde optimální alokační klíč";
         const simulateButton = document.createElement("input");
         simulateButton.type = "button";
-        simulateButton.value = "Find optimal weights";
+        simulateButton.value = "Najít optimální alokace";
         const progressDom = document.createElement("div");
         rowHeader.appendChild(simulateButton);
         rowHeader.appendChild(progressDom);
@@ -505,19 +522,19 @@ function displayComputation(csv: Csv): void {
                 numIterations,
                 (optimized: OptimizedAllocation, progress: number) => {
                     for (let i = 0; i < cells.length; ++i) {
-                        cells[i].innerHTML = `Optimal weight: ${optimized.weights[i]}&nbsp;%<br>`;
+                        cells[i].innerHTML = `Optimální alokace: ${optimized.weights[i]}&nbsp;%<br>`;
                         cells[i].innerHTML +=
-                            `Achieves Sharing: ${printKWh(optimized.sharing[i], { nbsp: true })}<br>`;
+                            ` dosáhne sdílení: ${printKWh(optimized.sharing[i], { nbsp: true })}<br>`;
                         cells[i].innerHTML += makeComparison(optimized.sharing[i], sumShared[i]);
                     }
                     const sumOptimized = sum(optimized.sharing);
-                    lastCell.innerHTML = `Total sharing: ${printKWh(sumOptimized, { nbsp: true })}<br>`;
+                    lastCell.innerHTML = `Celkové sdílení: ${printKWh(sumOptimized, { nbsp: true })}<br>`;
                     lastCell.innerHTML += makeComparison(sumOptimized, totalShared);
 
                     if (progress < numIterations) {
-                        progressDom.innerHTML = `Progress: ${progress} / ${numIterations}`;
+                        progressDom.innerHTML = `Výpočet... ${progress} / ${numIterations}`;
                     } else {
-                        progressDom.innerHTML = "DONE!";
+                        progressDom.innerHTML = "HOTOVO!";
                     }
                 },
             );
@@ -544,7 +561,7 @@ function displayIntervals(csv: Csv, groupedIntervals: Interval[]): void {
         if (
             useFiltering &&
             (intervalIndex === 0 ||
-                groupedIntervals[intervalIndex - 1].start.getUTCDate() !== interval.start.getUTCDate())
+                groupedIntervals[intervalIndex - 1].start.getDate() !== interval.start.getDate())
         ) {
             const separator = document.createElement("tr");
             separator.classList.add("daySeparator");
@@ -562,7 +579,7 @@ function displayIntervals(csv: Csv, groupedIntervals: Interval[]): void {
 
         const th = document.createElement("th");
         tr.appendChild(th);
-        th.innerHTML = printGroupedDate(interval.start);
+        th.innerHTML = printGroupedDate(interval.start, gSettings.grouping);
 
         const sumConsumedBefore = interval.consumers.reduce((prev, i) => prev + i.before, 0);
         const sumConsumedAfter = interval.consumers.reduce((prev, i) => prev + i.after, 0);
@@ -575,14 +592,14 @@ function displayIntervals(csv: Csv, groupedIntervals: Interval[]): void {
             //   th.title = `Missed ${printKWh(interval.sumMissed)} due to sub-optimal allocation keys.`;
         } else if (sumConsumedAfter > 0.05 * sumConsumedBefore) {
             th.classList.add("insufficient");
-            th.title = "Distribution EANs did not produce enough power to share.\n";
+            th.title = "Výrobní zdroje nevyprodukovaly dostatek energie k pokrytí celé spotřeby.\n";
         } else {
             th.classList.add("sufficient");
         }
-        th.title += `Consumed before sharing: ${printKWh(sumConsumedBefore)}\n`;
-        th.title += `Consumed after sharing: ${printKWh(sumConsumedAfter)}\n`;
-        th.title += `Production total: ${printKWh(interval.sumProduction)} (might not have been entirely shared due to timing and allocation issues)\n`;
-        th.title += `Production sold to grid: ${printKWh(interval.sumProduction - interval.sumSharing)}`;
+        th.title += `Celková spotřeba (před sdílením): ${printKWh(sumConsumedBefore)}\n`;
+        th.title += `Nakoupeno ze sítě (po sdílení): ${printKWh(sumConsumedAfter)}\n`;
+        th.title += `Celková výroba: ${printKWh(interval.sumProduction)} (část mohla zůstat nenasdílená kvůli alokačním klíčům)\n`;
+        th.title += `Výroba prodaná do sítě: ${printKWh(interval.sumProduction - interval.sumSharing)}`;
 
         for (let i = 0; i < interval.distributions.length; ++i) {
             const cell = tr.insertCell();
@@ -619,28 +636,27 @@ function displayIntervals(csv: Csv, groupedIntervals: Interval[]): void {
     colorizeRange("table#intervals td.distribution", GREEN);
 }
 
-function displayBarGraph(csv: Csv, groupedIntervals: Interval[]): void {
-    const holder = document.getElementById("intervalsGraph")!;
+function isDifferentDay(a: Date, b: Date): boolean {
+    return (
+        a.getDate() !== b.getDate() || a.getMonth() !== b.getMonth() || a.getFullYear() !== b.getFullYear()
+    );
+}
+
+function displayBarGraph(
+    holder: HTMLElement,
+    csv: Csv,
+    groupedIntervals: Interval[],
+    grouping: GroupingOptions,
+): void {
     holder.innerHTML = "";
     const canvas = document.createElement("canvas");
     holder.appendChild(canvas);
-
-    const missed = groupedIntervals.map((i: Interval) => i.sumMissed);
-    const sold = groupedIntervals.map((i: Interval) => {
-        const res = i.sumProduction - i.sumMissed - i.sumSharing;
-        assert(
-            res > -0.0000001,
-            "We need to clamp due to numerical imprecision, but the value outside of the tolerance",
-            res,
-        );
-        return Math.max(0, res);
-    });
 
     const datasets: { label: string; data: number[]; backgroundColor: string }[] = [];
 
     if (gSettings.groupGraph) {
         datasets.push({
-            label: "Shared",
+            label: "Sdílení",
             data: groupedIntervals.map((i: Interval) => i.sumSharing),
             backgroundColor: "green",
         });
@@ -665,7 +681,7 @@ function displayBarGraph(csv: Csv, groupedIntervals: Interval[]): void {
                 label = recalled;
             }
             datasets.push({
-                label: `Shared to ${label}`,
+                label: `Sdílení do: ${label}`,
                 data: groupedIntervals.map((x: Interval) => x.consumers[i].before - x.consumers[i].after),
                 backgroundColor: graphColors[i % graphColors.length],
             });
@@ -673,13 +689,23 @@ function displayBarGraph(csv: Csv, groupedIntervals: Interval[]): void {
     }
 
     if (gSettings.graphExtra === "produce") {
+        const sold = groupedIntervals.map((i: Interval) => {
+            const res = i.sumProduction - i.sumMissed - i.sumSharing;
+            assert(
+                res > -0.0000001,
+                "We need to clamp due to numerical imprecision, but the value outside of the tolerance",
+                res,
+            );
+            return Math.max(0, res);
+        });
+        const missed = groupedIntervals.map((i: Interval) => i.sumMissed);
         datasets.push(
-            { label: "Sold to grid (missed sharing)", data: missed, backgroundColor: "red" },
-            { label: "Sold to grid (no demand for sharing)", data: sold, backgroundColor: "gray" },
+            { label: "Prodáno do sítě (ušlá příležitost)", data: missed, backgroundColor: "red" },
+            { label: "Prodáno do sítě (odběratelé nepotřebovali více)", data: sold, backgroundColor: "gray" },
         );
     } else {
         datasets.push({
-            label: "Purchased from grid",
+            label: "Nakoupeno ze sítě",
             data: groupedIntervals.map((i: Interval) => i.consumers.reduce((prev, x) => prev + x.after, 0)),
             backgroundColor: "lightgray",
         });
@@ -689,10 +715,17 @@ function displayBarGraph(csv: Csv, groupedIntervals: Interval[]): void {
     const chart = new Chart.Chart(canvas, {
         type: "bar",
         data: {
-            labels: groupedIntervals.map((i: Interval) => printGroupedDate(i.start, false)),
+            labels: groupedIntervals.map((i: Interval) => {
+                let result = printGroupedDate(i.start, grouping, false);
+                if (!isDifferentDay(last(groupedIntervals).start, groupedIntervals[0].start)) {
+                    result = result.substring(11); // Remove date from the label if graph only shows 1 day
+                }
+                return result;
+            }),
             datasets,
         },
         options: {
+            animation: false, // So the graph immediately updates when sliding range selector
             scales: {
                 y: {
                     beginAtZero: true,
@@ -723,18 +756,47 @@ export function displayCsv(csv: Csv): void {
     const startTime = performance.now();
     assert(gSettings.filterValue >= 0 && gSettings.filterValue <= 1);
 
-    const dateFrom = structuredClone(csv.dateFrom);
-    dateFrom.setUTCDate(dateFrom.getUTCDate() + gSettings.minDayFilter);
-    const dateTo = structuredClone(csv.dateFrom);
-    dateTo.setUTCDate(dateTo.getUTCDate() + gSettings.maxDayFilter + 1);
-    dateTo.setUTCMinutes(dateTo.getUTCMinutes() - 1);
-    const groupedIntervals = csv.getGroupedIntervals(gSettings.grouping, dateFrom, dateTo);
+    const groupedIntervals = csv.getGroupedIntervals(gSettings.grouping);
 
     displayInputData(csv);
     displaySummary(csv, groupedIntervals);
     displayComputation(csv);
     displayIntervals(csv, groupedIntervals);
-    displayBarGraph(csv, groupedIntervals);
+    displayBarGraph(document.getElementById("intervalsGraph")!, csv, groupedIntervals, gSettings.grouping);
+
+    const grouping = gSettings.grouping === "15m" ? "15m" : "1h";
+    let daySummed = csv.getGroupedIntervals(grouping);
+    const split = daySummed.findIndex((value) => isDifferentDay(value.start, daySummed[0].start));
+    if (split >= 0) {
+        const toAccumulate = daySummed.slice(split);
+        daySummed = daySummed.slice(0, split);
+        for (const i of toAccumulate) {
+            const target = daySummed.find(
+                (value) =>
+                    value.start.getHours() === i.start.getHours() &&
+                    value.start.getMinutes() === i.start.getMinutes(),
+            );
+            if (target === undefined) {
+                assert(i.start.getHours() === 2); // Daylight savings
+            } else {
+                accumulateInterval(target, i);
+            }
+        }
+        const divFactor = gSettings.maxDayFilter - gSettings.minDayFilter + 1;
+        const divideMeasurement = (measurement: Measurement): void => {
+            measurement.before /= divFactor;
+            measurement.after /= divFactor;
+            measurement.missed /= divFactor;
+        };
+        for (const interval of daySummed) {
+            interval.sumSharing /= divFactor;
+            interval.sumMissed /= divFactor;
+            interval.sumProduction /= divFactor;
+            interval.consumers.forEach(divideMeasurement);
+            interval.distributions.forEach(divideMeasurement);
+        }
+    }
+    displayBarGraph(document.getElementById("dailyAverageGraph")!, csv, daySummed, grouping);
 
     console.log("displayCsv took", performance.now() - startTime, "ms");
 }
