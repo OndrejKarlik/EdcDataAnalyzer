@@ -892,6 +892,6 @@ groupGraph.addEventListener("change", () => {
     refreshView();
 });
 
-if (1) {
+if (0) {
     mock();
 }
