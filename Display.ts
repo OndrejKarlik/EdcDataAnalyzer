@@ -338,6 +338,11 @@ function displayComputation(csv: Csv): void {
     const saveEanAllocation = (ean: Ean, allocation: number): void => {
         localStorage.setItem(`EAN_allocation_${ean.name}`, allocation.toString());
     };
+    const recallEanCost = (ean: Ean): number =>
+        parseFloat(localStorage.getItem(`EAN_cost_${ean.name}`) ?? "2");
+    const saveEanCost = (ean: Ean, cost: number): void => {
+        localStorage.setItem(`EAN_cost_${ean.name}`, cost.toString());
+    };
 
     const table = document.getElementById("computation") as HTMLTableElement;
     assert(table !== null);
@@ -401,6 +406,35 @@ function displayComputation(csv: Csv): void {
         body.append(row);
     }
 
+    const costsInput = [] as HTMLInputElement[];
+    const getCostsInput = (): number[] => costsInput.map((i) => parseFloat(i.value));
+    {
+        // Costs of electricity
+        const row = document.createElement("tr");
+        const rowHeader = document.createElement("th");
+        rowHeader.innerHTML = "Cena za kWh:";
+        row.appendChild(rowHeader);
+
+        for (const ean of csv.consumerEans) {
+            const td = row.insertCell();
+            const input = document.createElement("input");
+            input.type = "number";
+            input.min = "0";
+            input.max = "100";
+            input.step = "0.1";
+            input.value = recallEanCost(ean).toString();
+            input.addEventListener("change", () => {
+                saveEanCost(ean, parseFloat(input.value));
+            });
+            td.appendChild(input);
+            costsInput.push(input);
+            td.insertAdjacentText("beforeend", " Kč");
+            row.appendChild(td);
+        }
+        row.appendChild(document.createElement("td"));
+        body.append(row);
+    }
+
     let totalShareable = 0;
     let totalShared = 0;
     const sumShared = Array<number>(csv.consumerEans.length).fill(0);
@@ -413,11 +447,27 @@ function displayComputation(csv: Csv): void {
             sumShared[i] += interval.consumers[i].before - interval.consumers[i].after;
         }
     }
-    // console.log(sumShared);
 
-    const makeComparison = (current: number, reference: number): string => {
-        const isMore = current - reference > -0.001;
-        return `<span style="color: ${isMore ? "green" : "red"}">Tato alokace sdílí ${printKWh(Math.abs(current - reference), { nbsp: true })} <strong>${isMore ? "více" : "méně"}</strong> než skutečné sdílení.</span>`;
+    const makeComparison = (
+        currentKwh: number,
+        referenceKwh: number,
+        currentCzk: number,
+        referenceCzk: number,
+    ): string => {
+        const comparison = (display: string, difference: number): string => {
+            if (difference > 0.001) {
+                return `<span style="color: green">${display} <strong>více</strong></span>`;
+            } else if (difference < -0.001) {
+                return `<span style="color: red">${display} <strong>méně</strong></span>`;
+            } else {
+                return `<span>${display}</span>`;
+            }
+        };
+        const kWh = printKWh(Math.abs(currentKwh - referenceKwh), { nbsp: true });
+        const czk = `${Math.abs(currentCzk - referenceCzk).toFixed(2)}&nbspKč`;
+        return `Oproti skutečnosti:<br>
+            ${comparison(kWh, currentKwh - referenceKwh)}<br>
+            ${comparison(czk, currentCzk - referenceCzk)}`;
     };
 
     const roundsDom = document.getElementById("rounds") as HTMLInputElement;
@@ -456,13 +506,21 @@ function displayComputation(csv: Csv): void {
                 return;
             }
             console.log(allocationPercentages);
-            const results = csv.simulateSharing(allocationPercentages, parseInt(roundsDom.value, 10));
+            const costsPerKwh = getCostsInput();
+            const referenceProfit = sumShared.map((value, index) => sumShared[index] * costsPerKwh[index]);
+            const results = csv.simulateSharing(
+                allocationPercentages,
+                costsPerKwh,
+                parseInt(roundsDom.value, 10),
+            );
             for (let i = 0; i < allocationSharingOutputs.length; ++i) {
                 allocationSharingOutputs[i].innerHTML =
-                    `Simulované sdílení: ${printKWh(results.sharingPerEan[i], { nbsp: true })}.<br>`;
+                    `Simulované sdílení: ${printKWh(results.sharingPerEan[i], { nbsp: true })} (${results.profitPerEan[i].toFixed(2)}&nbsp;Kč).<br>`;
                 allocationSharingOutputs[i].innerHTML += makeComparison(
                     results.sharingPerEan[i],
                     sumShared[i],
+                    results.profitPerEan[i],
+                    referenceProfit[i],
                 );
 
                 allocationSharingOutputs[i].title = "Sdílení v každém kole opakování:\n";
@@ -471,9 +529,15 @@ function displayComputation(csv: Csv): void {
                         `${round + 1}: ${printKWh(results.sharingPerRoundPerEan[round][i])} (${((100 * results.sharingPerRoundPerEan[round][i]) / Math.max(0.0000001, results.sharingPerEan[i])).toFixed(2)} %)\n`;
                 }
             }
-            let sumText = `Simulované sdílení: ${printKWh(results.sharingTotal, { nbsp: true })}<br>`;
-            sumText += `Ušlá příležitost: ${printKWh(totalShareable - results.sharingTotal, { nbsp: true })}<br>`;
-            sumText += makeComparison(results.sharingTotal, totalShared);
+            const sharingTotal = sum(results.sharingPerEan);
+            let sumText = `Simulované sdílení: ${printKWh(sharingTotal, { nbsp: true })} (${sum(results.profitPerEan).toFixed(2)}&nbsp;Kč)<br>`;
+            sumText += `Ušlá příležitost: ${printKWh(totalShareable - sharingTotal, { nbsp: true })}.<br>`;
+            sumText += makeComparison(
+                sharingTotal,
+                totalShared,
+                sum(results.profitPerEan),
+                sum(referenceProfit),
+            );
 
             lastCell.title = `Sdílení v každém kole opakování:\n`;
             for (let round = 0; round < results.sharingPerRoundPerEan.length; ++round) {
@@ -513,8 +577,11 @@ function displayComputation(csv: Csv): void {
                 10,
             );
 
+            const costsPerKwh = getCostsInput();
+            const referenceProfit = sumShared.map((value, index) => sumShared[index] * costsPerKwh[index]);
             csv.optimizeAllocation(
                 parseInt(roundsDom.value, 10),
+                costsPerKwh,
                 (document.getElementById("stochastic") as HTMLInputElement).checked
                     ? "random"
                     : "gradientDescend",
@@ -525,11 +592,21 @@ function displayComputation(csv: Csv): void {
                         cells[i].innerHTML = `Optimální alokace: ${optimized.weights[i]}&nbsp;%<br>`;
                         cells[i].innerHTML +=
                             ` dosáhne sdílení: ${printKWh(optimized.sharing[i], { nbsp: true })}<br>`;
-                        cells[i].innerHTML += makeComparison(optimized.sharing[i], sumShared[i]);
+                        cells[i].innerHTML += makeComparison(
+                            optimized.sharing[i],
+                            sumShared[i],
+                            optimized.profit[i],
+                            referenceProfit[i],
+                        );
                     }
                     const sumOptimized = sum(optimized.sharing);
                     lastCell.innerHTML = `Celkové sdílení: ${printKWh(sumOptimized, { nbsp: true })}<br>`;
-                    lastCell.innerHTML += makeComparison(sumOptimized, totalShared);
+                    lastCell.innerHTML += makeComparison(
+                        sumOptimized,
+                        totalShared,
+                        sum(optimized.profit),
+                        sum(referenceProfit),
+                    );
 
                     if (progress < numIterations) {
                         progressDom.innerHTML = `Výpočet... ${progress} / ${numIterations}`;

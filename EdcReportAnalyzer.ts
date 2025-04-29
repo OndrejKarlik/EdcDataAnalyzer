@@ -138,9 +138,10 @@ export function accumulateInterval(to: Interval, from: Interval): void {
 export interface OptimizedAllocation {
     weights: number[];
     sharing: number[];
+    profit: number[];
 }
 export interface SharingSimulationResult {
-    sharingTotal: number;
+    profitPerEan: number[];
     sharingPerEan: number[];
     sharingPerRoundPerEan: number[][]; // array[iterations][eans]
 }
@@ -278,7 +279,11 @@ export class Csv {
     }
 
     // TODO: filtering of time intervals?
-    simulateSharing(allocations: number[], iterations: number): SharingSimulationResult {
+    simulateSharing(
+        allocations: number[],
+        costsPerKwh: number[],
+        iterations: number,
+    ): SharingSimulationResult {
         // const startTime = Date.now();
         assert(sum(allocations) <= 100, "Allocations are over 100", allocations, sum(allocations));
         assert(this.distributionEans.length === 1);
@@ -314,20 +319,22 @@ export class Csv {
         }
         // Go back from fixed point to floats
         const resultEan = Array<number>(allocations.length).fill(0);
-        let sharingTotal = 0;
         for (let i = 0; i < iterations; ++i) {
             for (let j = 0; j < allocations.length; ++j) {
                 resultDetailed[i][j] /= 100;
                 resultEan[j] += resultDetailed[i][j];
-                sharingTotal += resultDetailed[i][j];
             }
         }
         // console.log("simulateSharing TOTAL took ", Date.now() - startTime, " ms");
-        return { sharingTotal, sharingPerEan: resultEan, sharingPerRoundPerEan: resultDetailed };
+        return {
+            profitPerEan: resultEan.map((value, index) => costsPerKwh[index] * value),
+            sharingPerEan: resultEan,
+            sharingPerRoundPerEan: resultDetailed,
+        };
     }
 
-    // Fast version computing only final sharing
-    simulateSharingFast(allocations: number[], iterations: number): number {
+    // Fast version computing only final profit
+    simulateSharingFast(allocations: number[], costsPerKwh: number[], iterations: number): number {
         // const startTime = Date.now();
         assert(sum(allocations) <= 100, "Allocations are over 100", allocations, sum(allocations));
         assert(this.distributionEans.length === 1);
@@ -342,7 +349,7 @@ export class Csv {
 
         // const flatConsumed = new Uint32Array(this.#flatConsumed);
 
-        let sharingTotal = 0;
+        const profitPerEan = Array<number>(allocations.length).fill(0);
         for (const interval of this.intervals) {
             // To fixed point. Note that the rounding is necessary even here. 0.07*100 = 7.000000000000001
             let toShare = Math.round(interval.distributions[0].before * 100);
@@ -359,31 +366,39 @@ export class Csv {
                     );
                     consumed[i] -= shared;
                     toShare -= shared;
-                    sharingTotal += shared;
+                    profitPerEan[i] += shared * costsPerKwh[i];
                     // console.log(shared);
                 }
             }
         }
-        return sharingTotal / 100;
+        return sum(profitPerEan) / 100;
     }
 
     // progressCallback is called at the end with final value
     optimizeAllocation(
         sharingRounds: number,
+        costsPerKwh: number[],
         algorithm: OptimizationAlgorithm,
         maxFails: number,
         restarts: number,
         progressCallback: (resultSoFar: OptimizedAllocation, iteration: number) => void,
     ): void {
         const startTime = Date.now();
-        let result = this.#optimizeAllocationIteration(sharingRounds, algorithm, maxFails);
+        let result = this.#optimizeAllocationIteration(sharingRounds, costsPerKwh, algorithm, maxFails);
 
         let progress = 0;
         const iterate = (): void => {
             ++progress;
-            const newResult = this.#optimizeAllocationIteration(sharingRounds, algorithm, maxFails);
-            console.log(`Restart ${progress} Achieved sharing ${sum(result.sharing)}`);
-            if (sum(newResult.sharing) > sum(result.sharing)) {
+            const newResult = this.#optimizeAllocationIteration(
+                sharingRounds,
+                costsPerKwh,
+                algorithm,
+                maxFails,
+            );
+            console.log(
+                `Restart ${progress} Achieved sharing ${sum(result.sharing)} yielding ${sum(result.profit)} CZK`,
+            );
+            if (sum(newResult.profit) > sum(result.profit)) {
                 result = newResult;
             }
             progressCallback(result, progress);
@@ -447,6 +462,7 @@ export class Csv {
 
     #optimizeAllocationIteration(
         sharingRounds: number,
+        costsPerKwh: number[],
         algorithm: OptimizationAlgorithm,
         maxFails: number,
     ): OptimizedAllocation {
@@ -485,20 +501,24 @@ export class Csv {
             return result;
         };
 
-        let bestSharing = this.simulateSharingFast(weights, sharingRounds);
+        let bestSharingProfit = this.simulateSharingFast(weights, costsPerKwh, sharingRounds);
         let failedInRow = 0;
         let iterations = 0;
         let bestWeights = structuredClone(weights);
         while (failedInRow < maxFails) {
             ++iterations;
 
-            let thisTotal = 0;
+            let thisTotalProfit = 0;
             if (algorithm === "gradientDescend") {
                 const STEP = 1;
                 const differences = [] as number[];
                 for (let i = 0; i < this.consumerEans.length; ++i) {
-                    const result = this.simulateSharingFast(bumpConsumer(i, STEP), sharingRounds);
-                    differences.push(result - bestSharing);
+                    const resultProfit = this.simulateSharingFast(
+                        bumpConsumer(i, STEP),
+                        costsPerKwh,
+                        sharingRounds,
+                    );
+                    differences.push(resultProfit - bestSharingProfit);
                 }
                 // console.log(differences);
                 let max = 0;
@@ -507,41 +527,43 @@ export class Csv {
                         max = i;
                     }
                 }
-                thisTotal = this.simulateSharingFast(weights, sharingRounds);
+                thisTotalProfit = this.simulateSharingFast(weights, costsPerKwh, sharingRounds);
             } else {
                 const randomIndex = Math.trunc(Math.random() * this.consumerEans.length);
                 const randomAmount = Math.abs(gaussianRandom(0, 5));
                 // console.log("random amount", randomAmount);
                 const proposedWeights = bumpConsumer(randomIndex, randomAmount);
-                const proposedResult = this.simulateSharingFast(proposedWeights, sharingRounds);
-                if (proposedResult > bestSharing) {
+                const proposedProfit = this.simulateSharingFast(proposedWeights, costsPerKwh, sharingRounds);
+                if (proposedProfit > bestSharingProfit) {
                     weights = proposedWeights;
                     // console.log(proposedWeights);
-                    thisTotal = proposedResult;
+                    thisTotalProfit = proposedProfit;
                 }
             }
 
-            if (thisTotal <= bestSharing) {
+            if (thisTotalProfit <= bestSharingProfit) {
                 ++failedInRow;
             } else {
                 // console.log(thisTotal);
-                bestSharing = thisTotal;
+                bestSharingProfit = thisTotalProfit;
                 bestWeights = structuredClone(weights);
                 failedInRow = 0;
             }
         }
-        const final = this.simulateSharing(bestWeights, sharingRounds);
+        const final = this.simulateSharing(bestWeights, costsPerKwh, sharingRounds);
         assert(
-            Math.abs(final.sharingTotal - this.simulateSharingFast(bestWeights, sharingRounds)) < 0.01,
-            final.sharingTotal,
-            this.simulateSharingFast(bestWeights, sharingRounds),
+            Math.abs(
+                sum(final.profitPerEan) - this.simulateSharingFast(bestWeights, costsPerKwh, sharingRounds),
+            ) < 0.01,
+            sum(final.profitPerEan),
+            this.simulateSharingFast(bestWeights, costsPerKwh, sharingRounds),
         );
         console.log(
-            `Optimize Weights iteration took ${iterations} iterations and ${Date.now() - timeStart} ms. Sharing achieved: ${final.sharingTotal}`,
+            `Optimize Weights iteration took ${iterations} iterations and ${Date.now() - timeStart} ms. Sharing achieved: ${sum(final.sharingPerEan)} kWh, ${sum(final.profitPerEan)} CZK`,
         );
         // console.log(`Sum weights ${bestWeights.reduce((w, a) => w + a, 0)}`);
         assert(bestWeights.reduce((w, a) => w + a, 0) <= 100);
-        return { weights: bestWeights, sharing: final.sharingPerEan };
+        return { profit: final.profitPerEan, weights: bestWeights, sharing: final.sharingPerEan };
     }
 }
 
