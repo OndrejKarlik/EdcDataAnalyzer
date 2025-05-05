@@ -438,7 +438,7 @@ function displayComputation(csv: Csv): void {
     let totalShareable = 0;
     let totalShared = 0;
     const sumShared = Array<number>(csv.consumerEans.length).fill(0);
-    for (const interval of csv.intervals) {
+    for (const interval of csv.getGroupedIntervals("15m")) {
         for (const distribution of interval.distributions) {
             totalShareable += distribution.before - distribution.after + distribution.missed;
             totalShared += distribution.before - distribution.after;

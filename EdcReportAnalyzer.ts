@@ -154,6 +154,7 @@ function gaussianRandom(mean = 0, stdev = 1): number {
     // Transform to the desired mean and standard deviation:
     return z * stdev + mean;
 }
+
 export class Csv {
     distributionEans: Ean[] = [];
     consumerEans: Ean[] = [];
@@ -162,14 +163,14 @@ export class Csv {
     dateFrom: Date;
     dateTo: Date;
 
-    intervals: Interval[] = [];
+    readonly #intervals: Interval[];
 
     // Used for optimizing sharing
     // readonly #flatConsumed: Uint32Array;
 
     constructor(filename: string, intervals: Interval[], distributionEans: Ean[], consumerEans: Ean[]) {
         this.filename = filename;
-        this.intervals = intervals;
+        this.#intervals = intervals;
         this.dateFrom = intervals[0].start;
         this.dateTo = structuredClone(last(intervals).start);
         this.dateTo.setMinutes(this.dateTo.getMinutes() + 14);
@@ -227,14 +228,14 @@ export class Csv {
         const [dateFrom, dateTo] = this.#getDayFilterDates();
         const timer = performance.now();
         const result: Interval[] = [];
-        for (let i = 0; i < this.intervals.length; ++i) {
-            if (this.intervals[i].start < dateFrom || this.intervals[i].start > dateTo) {
+        for (let i = 0; i < this.#intervals.length; ++i) {
+            if (this.#intervals[i].start < dateFrom || this.#intervals[i].start > dateTo) {
                 continue;
             }
             let mergeToLast = false;
             if (result.length > 0) {
-                const dateLast = this.intervals[i - 1].start;
-                const dateThis = this.intervals[i].start;
+                const dateLast = this.#intervals[i - 1].start;
+                const dateThis = this.#intervals[i].start;
                 switch (grouping) {
                     case "15m":
                         mergeToLast = false;
@@ -253,14 +254,14 @@ export class Csv {
                 }
             }
             if (mergeToLast) {
-                accumulateInterval(last(result), this.intervals[i]);
+                accumulateInterval(last(result), this.#intervals[i]);
             } else {
-                result.push(structuredClone(this.intervals[i]));
+                result.push(structuredClone(this.#intervals[i]));
             }
         }
         console.log(
             "Merging intervals",
-            this.intervals.length,
+            this.#intervals.length,
             "=>",
             result.length,
             "elapsed",
@@ -278,7 +279,6 @@ export class Csv {
         return (utc1 - utc2) / (1000 * 3600 * 24) + 1;
     }
 
-    // TODO: filtering of time intervals?
     simulateSharing(
         allocations: number[],
         costsPerKwh: number[],
@@ -295,7 +295,8 @@ export class Csv {
             resultDetailed.push(Array<number>(allocations.length).fill(0));
         }
 
-        for (const interval of this.intervals) {
+        // Filter the intervals by time by calling getGroupedIntervals
+        for (const interval of this.getGroupedIntervals("15m")) {
             // To fixed point. Note that the rounding is necessary even here. 0.07*100 = 7.000000000000001
             let toShare = Math.round(interval.distributions[0].before * 100);
             const consumed: number[] = interval.consumers.map((c) => Math.round(c.before * 100));
@@ -334,7 +335,12 @@ export class Csv {
     }
 
     // Fast version computing only final profit
-    simulateSharingFast(allocations: number[], costsPerKwh: number[], iterations: number): number {
+    simulateSharingFast(
+        filteredIntervals: Interval[],
+        allocations: number[],
+        costsPerKwh: number[],
+        iterations: number,
+    ): number {
         // const startTime = Date.now();
         assert(sum(allocations) <= 100, "Allocations are over 100", allocations, sum(allocations));
         assert(this.distributionEans.length === 1);
@@ -350,7 +356,7 @@ export class Csv {
         // const flatConsumed = new Uint32Array(this.#flatConsumed);
 
         const profitPerEan = Array<number>(allocations.length).fill(0);
-        for (const interval of this.intervals) {
+        for (const interval of filteredIntervals) {
             // To fixed point. Note that the rounding is necessary even here. 0.07*100 = 7.000000000000001
             let toShare = Math.round(interval.distributions[0].before * 100);
 
@@ -424,13 +430,8 @@ export class Csv {
         assert(hasConsumer, "Pro export CSV musí být zobrazen aspoň jeden odběratelský EAN");
         result += "IN-859182400000000000-D;OUT-859182400000000000-D\n"; // Virtual EANs that will be the inverse of consumption
 
-        const [dateFrom, dateTo] = this.#getDayFilterDates();
         const printNumberCzech = (x: number): string => x.toFixed(2).replaceAll(".", ",");
-        for (const interval of this.intervals) {
-            if (interval.start < dateFrom || interval.start > dateTo) {
-                console.log("filtering", interval.start, dateFrom, dateTo);
-                continue;
-            }
+        for (const interval of this.getGroupedIntervals("15m")) {
             result += `${String(interval.start.getDate()).padStart(2, "0")}.${String(interval.start.getMonth() + 1).padStart(2, "0")}.${interval.start.getFullYear()};`;
             const intervalEnd = structuredClone(interval.start);
             intervalEnd.setMinutes(intervalEnd.getMinutes() + 15);
@@ -501,7 +502,14 @@ export class Csv {
             return result;
         };
 
-        let bestSharingProfit = this.simulateSharingFast(weights, costsPerKwh, sharingRounds);
+        const filteredIntervals = this.getGroupedIntervals("15m");
+
+        let bestSharingProfit = this.simulateSharingFast(
+            filteredIntervals,
+            weights,
+            costsPerKwh,
+            sharingRounds,
+        );
         let failedInRow = 0;
         let iterations = 0;
         let bestWeights = structuredClone(weights);
@@ -514,6 +522,7 @@ export class Csv {
                 const differences = [] as number[];
                 for (let i = 0; i < this.consumerEans.length; ++i) {
                     const resultProfit = this.simulateSharingFast(
+                        filteredIntervals,
                         bumpConsumer(i, STEP),
                         costsPerKwh,
                         sharingRounds,
@@ -527,13 +536,23 @@ export class Csv {
                         max = i;
                     }
                 }
-                thisTotalProfit = this.simulateSharingFast(weights, costsPerKwh, sharingRounds);
+                thisTotalProfit = this.simulateSharingFast(
+                    filteredIntervals,
+                    weights,
+                    costsPerKwh,
+                    sharingRounds,
+                );
             } else {
                 const randomIndex = Math.trunc(Math.random() * this.consumerEans.length);
                 const randomAmount = Math.abs(gaussianRandom(0, 5));
                 // console.log("random amount", randomAmount);
                 const proposedWeights = bumpConsumer(randomIndex, randomAmount);
-                const proposedProfit = this.simulateSharingFast(proposedWeights, costsPerKwh, sharingRounds);
+                const proposedProfit = this.simulateSharingFast(
+                    filteredIntervals,
+                    proposedWeights,
+                    costsPerKwh,
+                    sharingRounds,
+                );
                 if (proposedProfit > bestSharingProfit) {
                     weights = proposedWeights;
                     // console.log(proposedWeights);
@@ -553,10 +572,11 @@ export class Csv {
         const final = this.simulateSharing(bestWeights, costsPerKwh, sharingRounds);
         assert(
             Math.abs(
-                sum(final.profitPerEan) - this.simulateSharingFast(bestWeights, costsPerKwh, sharingRounds),
+                sum(final.profitPerEan) -
+                    this.simulateSharingFast(filteredIntervals, bestWeights, costsPerKwh, sharingRounds),
             ) < 0.01,
             sum(final.profitPerEan),
-            this.simulateSharingFast(bestWeights, costsPerKwh, sharingRounds),
+            this.simulateSharingFast(filteredIntervals, bestWeights, costsPerKwh, sharingRounds),
         );
         console.log(
             `Optimize Weights iteration took ${iterations} iterations and ${Date.now() - timeStart} ms. Sharing achieved: ${sum(final.sharingPerEan)} kWh, ${sum(final.profitPerEan)} CZK`,
@@ -914,6 +934,8 @@ groupGraph.addEventListener("change", () => {
     refreshView();
 });
 
-if (0) {
+// @ts-expect-error Checking for run-time injection from parcel. Display mock only during development
+// eslint-disable-next-line @typescript-eslint/strict-boolean-expressions, @typescript-eslint/no-unsafe-member-access
+if (module.hot) {
     mock();
 }
