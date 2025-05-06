@@ -725,22 +725,59 @@ function displayBarGraph(
     groupedIntervals: Interval[],
     grouping: GroupingOptions,
 ): void {
+    console.log(`DRAWING GRAPH ${grouping}`);
     holder.innerHTML = "";
     const canvas = document.createElement("canvas");
     holder.appendChild(canvas);
 
-    const datasets: { label: string; data: number[]; backgroundColor: string }[] = [];
+    interface DatasetItem {
+        label: string;
+        data: number[];
+        backgroundColor: string;
+    }
+    const datasets: DatasetItem[] = [];
 
     if (gSettings.groupGraph) {
-        datasets.push({
-            label: "Sdílení",
-            data: groupedIntervals.map((i: Interval) => i.sumSharing),
-            backgroundColor: "green",
-        });
+        datasets.push(
+            {
+                label: "Sdílení",
+                data: groupedIntervals.map((i: Interval) => i.sumSharing),
+                backgroundColor: "green",
+            },
+            {
+                label: `${gSettings.graphExtra === "consume" ? "Nakoupeno ze" : "Prodáno do"} sítě (ušlá příležitost)`,
+                data: groupedIntervals.map((i: Interval) => i.sumMissed),
+                backgroundColor: "red",
+            },
+        );
+        if (gSettings.graphExtra === "produce") {
+            const sold = groupedIntervals.map((i: Interval) => {
+                const res = i.sumProduction - i.sumMissed - i.sumSharing;
+                assert(
+                    res > -0.0000001,
+                    "We need to clamp due to numerical imprecision, but the value outside of the tolerance",
+                    res,
+                );
+                return Math.max(0, res);
+            });
+            datasets.push({
+                label: "Prodáno do sítě (odběratelé nepotřebovali více)",
+                data: sold,
+                backgroundColor: "lightgray",
+            });
+        } else {
+            datasets.push({
+                label: "Nakoupeno ze sítě",
+                data: groupedIntervals.map((i: Interval) =>
+                    i.consumers.reduce((prev, x) => prev + x.after, 0),
+                ),
+                backgroundColor: "lightgray",
+            });
+        }
     } else {
         // Chatgpt: Here’s an improved distinct set of vibrant green shades, covering a range from yellowish-greens to bluish-greens:
-        const graphColors = [
-            "#00A86B", // Jade Green (Balanced)
+        const graphSharingColors = [
+            "green", // Jade Green (Balanced)
             "#4CBB17", // Leaf Green (Bright Natural)
             "#ADFF2F", // Green-Yellow (Lime Zest)
             "#228B22", // Forest Green (Deep & Earthy)
@@ -751,6 +788,32 @@ function displayBarGraph(
             "#A7C957", // Olive Yellow-Green (Muted but Strong)
             "#008080", // Teal Green (Blue-Tinted)
         ];
+        const graphInactiveColors = [
+            "lightgray", // cool light steel
+            "#888f95", // medium steel gray
+            "#c4c9cc", // fog gray
+            "#7c8389", // deeper slate
+            "#b8bfc4", // muted cloud
+            "#acb4b9", // dusty silver
+            "#646b71", // deep graphite
+            "#70777d", // slate ash
+            "#a0a7ac", // graphite mist
+            "#949ba1", // smoky silver
+        ];
+        const graphMissedColors = [
+            "red", // pure red
+            "#cc0000", // dark red
+            "#e60026", // fire red
+            "#b30000", // blood red
+            "#ff1a1a", // bright red
+            "#990000", // deep crimson
+            "#ff3333", // light crimson
+            "#800000", // maroon
+            "#d40000", // primary red
+            "#ff4d4d", // soft red
+        ];
+        const datasetsMissed: DatasetItem[] = [];
+        const datasetsInactive: DatasetItem[] = [];
         for (let i = 0; i < csv.consumerEans.length; ++i) {
             let label = printEan(csv.consumerEans[i].name);
             const recalled = recallEanAlias(csv.consumerEans[i]);
@@ -760,43 +823,111 @@ function displayBarGraph(
             datasets.push({
                 label: `Sdílení do: ${label}`,
                 data: groupedIntervals.map((x: Interval) => x.consumers[i].before - x.consumers[i].after),
-                backgroundColor: graphColors[i % graphColors.length],
+                backgroundColor: graphSharingColors[i % graphSharingColors.length],
             });
+            if (gSettings.graphExtra === "consume") {
+                datasetsInactive.push({
+                    label: `Nakoupeno ze sítě do: ${label}`,
+                    data: groupedIntervals.map((x: Interval) => x.consumers[i].after),
+                    backgroundColor: graphInactiveColors[i % graphInactiveColors.length],
+                });
+                datasetsMissed.push({
+                    label: `Nakoupeno ze sítě do: ${label} (ušlá příležitost)`,
+                    data: groupedIntervals.map((x: Interval) => x.consumers[i].missed),
+                    backgroundColor: graphMissedColors[i % graphMissedColors.length],
+                });
+            }
         }
+        if (gSettings.graphExtra === "produce") {
+            for (let i = 0; i < csv.distributionEans.length; ++i) {
+                let label = printEan(csv.distributionEans[i].name);
+                const recalled = recallEanAlias(csv.distributionEans[i]);
+                if (recalled.length > 0) {
+                    label = recalled;
+                }
+                datasets.push(
+                    {
+                        label: `Prodáno do sítě od ${label} (ušlá příležitost)`,
+                        data: groupedIntervals.map((x: Interval) => x.distributions[i].missed),
+                        backgroundColor: graphMissedColors[i % graphMissedColors.length],
+                    },
+                    {
+                        label: `Prodáno do sítě od ${label}`,
+                        data: groupedIntervals.map(
+                            (x: Interval) => x.distributions[i].after - x.distributions[i].missed,
+                        ),
+                        backgroundColor: graphInactiveColors[i % graphInactiveColors.length],
+                    },
+                );
+            }
+        }
+        datasets.push(...datasetsMissed, ...datasetsInactive);
     }
 
-    if (gSettings.graphExtra === "produce") {
-        const sold = groupedIntervals.map((i: Interval) => {
-            const res = i.sumProduction - i.sumMissed - i.sumSharing;
-            assert(
-                res > -0.0000001,
-                "We need to clamp due to numerical imprecision, but the value outside of the tolerance",
-                res,
-            );
-            return Math.max(0, res);
-        });
-        const missed = groupedIntervals.map((i: Interval) => i.sumMissed);
-        datasets.push(
-            { label: "Prodáno do sítě (ušlá příležitost)", data: missed, backgroundColor: "red" },
-            { label: "Prodáno do sítě (odběratelé nepotřebovali více)", data: sold, backgroundColor: "gray" },
-        );
-    } else {
-        datasets.push({
-            label: "Nakoupeno ze sítě",
-            data: groupedIntervals.map((i: Interval) => i.consumers.reduce((prev, x) => prev + x.after, 0)),
-            backgroundColor: "lightgray",
-        });
-    }
+    assert(groupedIntervals.length > 0);
+    const daySeparatorPlugin = {
+        id: "daySeparator",
+        afterDraw(chart: Chart.Chart<"bar">): void {
+            const labels = chart.data.labels as string[];
+
+            type SeparatorInterval = "none" | "day" | "month" | "year";
+            let groupingInterval: SeparatorInterval = "day";
+            const timeDiff = last(groupedIntervals).start.getTime() - groupedIntervals[0].start.getTime();
+            const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+            if (timeDiff > 600 * MS_PER_DAY || grouping === "1m") {
+                groupingInterval = "year";
+            } else if (timeDiff > 31 * MS_PER_DAY || grouping === "1d") {
+                groupingInterval = "month";
+            } else if (grouping === "1h" || grouping === "15m") {
+                groupingInterval = "day";
+            }
+            console.log(`Selected grouping interval: ${groupingInterval}`);
+
+            for (let i = 1; i < labels.length; i++) {
+                const prev = groupedIntervals[i - 1].start;
+                const curr = groupedIntervals[i].start;
+
+                let drawLine = false;
+                switch (groupingInterval) {
+                    case "day":
+                        drawLine = prev.getDay() !== curr.getDay();
+                        break;
+                    case "month":
+                        drawLine = prev.getMonth() !== curr.getMonth();
+                        break;
+                    case "year":
+                        drawLine = prev.getFullYear() !== curr.getFullYear();
+                        break;
+                    default:
+                        break; // No grouping
+                }
+                if (drawLine) {
+                    const xPos =
+                        (chart.scales.x.getPixelForValue(i) + chart.scales.x.getPixelForValue(i - 1)) / 2;
+                    chart.ctx.save();
+                    chart.ctx.beginPath();
+                    chart.ctx.moveTo(xPos, chart.chartArea.top);
+                    chart.ctx.lineTo(xPos, chart.chartArea.bottom);
+                    chart.ctx.lineWidth = 2;
+                    chart.ctx.strokeStyle = "rgba(0,0,0,1)";
+                    chart.ctx.stroke();
+                    chart.ctx.restore();
+                }
+            }
+        },
+    };
 
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const chart = new Chart.Chart(canvas, {
         type: "bar",
         data: {
-            labels: groupedIntervals.map((i: Interval) => {
+            labels: groupedIntervals.map((i: Interval): string => {
                 let result = printGroupedDate(i.start, grouping, false);
                 if (!isDifferentDay(last(groupedIntervals).start, groupedIntervals[0].start)) {
                     result = result.substring(11); // Remove date from the label if graph only shows 1 day
                 }
+                // console.log(grouping, result);
                 return result;
             }),
             datasets,
@@ -826,6 +957,7 @@ function displayBarGraph(
                 },
             },
         },
+        plugins: [daySeparatorPlugin],
     });
 }
 
