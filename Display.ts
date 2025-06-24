@@ -58,6 +58,16 @@ function saveEanAlias(ean: Ean, alias: string): void {
     localStorage.setItem(`EAN_alias_${ean.name}`, alias);
 }
 
+export function setAllShowCheckboxes(checked: boolean): void {
+    document.querySelectorAll("th.consumer > input[type=checkbox]").forEach((input: Element) => {
+        const checkbox = input as HTMLInputElement;
+        if (checkbox.checked !== checked) {
+            checkbox.checked = checked;
+            checkbox.dispatchEvent(new Event("click"));
+        }
+    });
+}
+
 type HeaderFeature = "closeButton" | "editableName";
 function createEanHeader(
     element: HTMLElement,
@@ -78,6 +88,16 @@ function createEanHeader(
             refreshView();
         });
         element.appendChild(close);
+        const isolate = document.createElement("div");
+        isolate.classList.add("isolate");
+        isolate.innerHTML = "🧿";
+        isolate.title = "Zobrazit pouze tento EAN";
+        isolate.addEventListener("click", () => {
+            setAllShowCheckboxes(false);
+            close.checked = true;
+            close.dispatchEvent(new Event("click"));
+        });
+        element.appendChild(isolate);
     }
 
     if (!hideable || !gSettings.hiddenEans.has(ean.name)) {
@@ -737,42 +757,71 @@ function displayBarGraph(
     }
     const datasets: DatasetItem[] = [];
 
+    const sharingPerConsumer: number[][] = [];
+    const purchasedPerConsumer: number[][] = [];
+    const missedPerConsumer: number[][] = [];
+    for (let i = 0; i < csv.consumerEans.length; ++i) {
+        sharingPerConsumer.push([]);
+        purchasedPerConsumer.push([]);
+        missedPerConsumer.push([]);
+        for (const interval of groupedIntervals) {
+            if (gSettings.hiddenEans.has(csv.consumerEans[i].name)) {
+                last(sharingPerConsumer).push(0);
+                last(purchasedPerConsumer).push(0);
+                last(missedPerConsumer).push(0);
+            } else {
+                last(sharingPerConsumer).push(interval.consumers[i].before - interval.consumers[i].after);
+                last(purchasedPerConsumer).push(interval.consumers[i].after - interval.consumers[i].missed);
+                last(missedPerConsumer).push(interval.consumers[i].missed);
+            }
+        }
+    }
+    const soldPerDistributor: number[][] = [];
+    const missedPerDistributor: number[][] = [];
+    for (let i = 0; i < csv.distributionEans.length; ++i) {
+        missedPerDistributor.push([]);
+        soldPerDistributor.push([]);
+        for (const interval of groupedIntervals) {
+            if (gSettings.hiddenEans.has(csv.distributionEans[i].name)) {
+                last(missedPerDistributor).push(0);
+                last(soldPerDistributor).push(0);
+            } else {
+                last(missedPerDistributor).push(interval.distributions[i].missed);
+                last(soldPerDistributor).push(
+                    interval.distributions[i].after - interval.distributions[i].missed,
+                );
+            }
+        }
+    }
+
     if (gSettings.groupGraph) {
+        const sumShared: number[] = [];
+        const sumMissed: number[] = [];
+        const sumSold: number[] = [];
+        const sumPurchased: number[] = [];
+        for (let i = 0; i < groupedIntervals.length; ++i) {
+            sumShared.push(sharingPerConsumer.reduce((prev, x) => prev + x[i], 0));
+            sumMissed.push(missedPerConsumer.reduce((prev, x) => prev + x[i], 0));
+            sumPurchased.push(purchasedPerConsumer.reduce((prev, x) => prev + x[i], 0));
+            sumSold.push(soldPerDistributor.reduce((prev, x) => prev + x[i], 0));
+        }
+
         datasets.push(
-            {
-                label: "Sdílení",
-                data: groupedIntervals.map((i: Interval) => i.sumSharing),
-                backgroundColor: "green",
-            },
+            { label: "Sdílení", data: sumShared, backgroundColor: "green" },
             {
                 label: `${gSettings.graphExtra === "consume" ? "Nakoupeno ze" : "Prodáno do"} sítě (ušlá příležitost)`,
-                data: groupedIntervals.map((i: Interval) => i.sumMissed),
+                data: sumMissed,
                 backgroundColor: "red",
             },
         );
         if (gSettings.graphExtra === "produce") {
-            const sold = groupedIntervals.map((i: Interval) => {
-                const res = i.sumProduction - i.sumMissed - i.sumSharing;
-                assert(
-                    res > -0.0000001,
-                    "We need to clamp due to numerical imprecision, but the value outside of the tolerance",
-                    res,
-                );
-                return Math.max(0, res);
-            });
             datasets.push({
                 label: "Prodáno do sítě (odběratelé nepotřebovali více)",
-                data: sold,
+                data: sumSold,
                 backgroundColor: "lightgray",
             });
         } else {
-            datasets.push({
-                label: "Nakoupeno ze sítě",
-                data: groupedIntervals.map((i: Interval) =>
-                    i.consumers.reduce((prev, x) => prev + x.after, 0),
-                ),
-                backgroundColor: "lightgray",
-            });
+            datasets.push({ label: "Nakoupeno ze sítě", data: sumPurchased, backgroundColor: "lightgray" });
         }
     } else {
         // Chatgpt: Here’s an improved distinct set of vibrant green shades, covering a range from yellowish-greens to bluish-greens:
@@ -814,7 +863,11 @@ function displayBarGraph(
         ];
         const datasetsMissed: DatasetItem[] = [];
         const datasetsInactive: DatasetItem[] = [];
+
         for (let i = 0; i < csv.consumerEans.length; ++i) {
+            if (gSettings.hiddenEans.has(csv.consumerEans[i].name)) {
+                continue;
+            }
             let label = printEan(csv.consumerEans[i].name);
             const recalled = recallEanAlias(csv.consumerEans[i]);
             if (recalled.length > 0) {
@@ -822,24 +875,27 @@ function displayBarGraph(
             }
             datasets.push({
                 label: `Sdílení do: ${label}`,
-                data: groupedIntervals.map((x: Interval) => x.consumers[i].before - x.consumers[i].after),
+                data: sharingPerConsumer[i],
                 backgroundColor: graphSharingColors[i % graphSharingColors.length],
             });
             if (gSettings.graphExtra === "consume") {
                 datasetsInactive.push({
                     label: `Nakoupeno ze sítě do: ${label}`,
-                    data: groupedIntervals.map((x: Interval) => x.consumers[i].after),
+                    data: purchasedPerConsumer[i],
                     backgroundColor: graphInactiveColors[i % graphInactiveColors.length],
                 });
                 datasetsMissed.push({
                     label: `Nakoupeno ze sítě do: ${label} (ušlá příležitost)`,
-                    data: groupedIntervals.map((x: Interval) => x.consumers[i].missed),
+                    data: missedPerConsumer[i],
                     backgroundColor: graphMissedColors[i % graphMissedColors.length],
                 });
             }
         }
         if (gSettings.graphExtra === "produce") {
             for (let i = 0; i < csv.distributionEans.length; ++i) {
+                if (gSettings.hiddenEans.has(csv.distributionEans[i].name)) {
+                    continue;
+                }
                 let label = printEan(csv.distributionEans[i].name);
                 const recalled = recallEanAlias(csv.distributionEans[i]);
                 if (recalled.length > 0) {
@@ -848,14 +904,12 @@ function displayBarGraph(
                 datasets.push(
                     {
                         label: `Prodáno do sítě od ${label} (ušlá příležitost)`,
-                        data: groupedIntervals.map((x: Interval) => x.distributions[i].missed),
+                        data: missedPerDistributor[i],
                         backgroundColor: graphMissedColors[i % graphMissedColors.length],
                     },
                     {
                         label: `Prodáno do sítě od ${label}`,
-                        data: groupedIntervals.map(
-                            (x: Interval) => x.distributions[i].after - x.distributions[i].missed,
-                        ),
+                        data: soldPerDistributor[i],
                         backgroundColor: graphInactiveColors[i % graphInactiveColors.length],
                     },
                 );

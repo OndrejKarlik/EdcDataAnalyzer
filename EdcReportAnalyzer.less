@@ -167,6 +167,24 @@ ul#warnings {
 th.distribution,
 th.consumer {
     word-break: break-word;
+    position: relative;
+
+    input[type="checkbox"] {
+        display: inline;
+        width: auto;
+        margin: 0;
+        padding: 0;
+    }
+
+    div.isolate {
+        position: absolute;
+        right: 0;
+        top: 0;
+        user-select: none;
+        cursor: pointer;
+        margin: 0;
+        padding: 0;
+    }
 }
 
 tr.csvHeaderRow input {
@@ -178,6 +196,7 @@ table#computation {
     input {
         text-align: right;
     }
+
     input[type="number"] {
         width: 70%;
         text-align: right;

@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/non-nullable-type-assertion-style */
 /* eslint-disable @typescript-eslint/no-unsafe-type-assertion */
 
-import { printKWh, printDate, printOnlyDate, displayCsv } from "./Display.js";
+import { printKWh, printDate, printOnlyDate, displayCsv, setAllShowCheckboxes } from "./Display.js";
 import { mock } from "./Mock.js";
 import * as NoUiSlider from "nouislider";
 import "nouislider/dist/nouislider.css";
@@ -93,8 +93,11 @@ function getDate(explodedLine: string[]): Date {
 }
 
 export interface Measurement {
+    /// Measured from EDC
     before: number;
+    /// Measured from EDC
     after: number;
+    /// We compute this, it is portion of "after"
     missed: number;
 }
 
@@ -928,6 +931,12 @@ document.getElementById("download")!.addEventListener("click", () => {
     }
 });
 
+document.getElementById("showAll")!.addEventListener("click", () => {
+    setAllShowCheckboxes(true);
+});
+document.getElementById("showNone")!.addEventListener("click", () => {
+    setAllShowCheckboxes(false);
+});
 const groupGraph = document.getElementById("groupGraph") as HTMLInputElement;
 groupGraph.addEventListener("change", () => {
     gSettings.groupGraph = (document.getElementById("groupGraph") as HTMLInputElement).checked;

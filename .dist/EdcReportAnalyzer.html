@@ -1,27 +1,17 @@
-<!doctype html>
-<html>
-    <head>
-        <link rel="shortcut icon" href="favicon.ico" />
-        <script type="module" src="EdcReportAnalyzer.ts"></script>
-        <link rel="stylesheet" href="EdcReportAnalyzer.less" />
-
-        <title>Analýza EDC CSV reportů</title>
-    </head>
-
-    <body>
-        <ul id="warnings"></ul>
+<!DOCTYPE html><link rel=stylesheet href=EdcReportAnalyzer.6a04ec82.css><link rel="icon shortcut" href=favicon.a7a458ad.ico><script type=module src=EdcReportAnalyzer.6c086d3e.js></script><link rel=stylesheet href=EdcReportAnalyzer.f4c686dc.css><title>Analýza EDC CSV reportů</title><body>
+        <ul id=warnings></ul>
 
         <div>
             <h1>Analýza EDC CSV reportů</h1>
-            [&copy; Ondra Karlík] [<a href="https://github.com/OndrejKarlik/EdcDataAnalyzer">github</a>]
+            [© Ondra Karlík] [<a href=https://github.com/OndrejKarlik/EdcDataAnalyzer>github</a>]
 
             <details open>
                 <summary><h2>Ovládání</h2></summary>
-                <div id="controls">
+                <div id=controls>
                     <div>
                         <label>
-                            Nahrajte CSV z <a href="https://www.edc-cr.cz/">EDC</a>:&nbsp;&nbsp;&nbsp;
-                            <input type="file" id="uploadCsv" accept="text/csv" />
+                            Nahrajte CSV z <a href=https://www.edc-cr.cz/>EDC</a>:&nbsp;&nbsp;&nbsp;
+                            <input type=file id=uploadCsv accept=text/csv>
                         </label>
                         <ul>
                             <li>
@@ -37,70 +27,58 @@
                         </ul>
                     </div>
                     <div>
-                        <label>Anonymizovat EANy<input type="checkbox" id="anonymizeEans" /></label>
+                        <label>Anonymizovat EANy<input type=checkbox id=anonymizeEans></label>
 
                         &nbsp;&nbsp;&nbsp; Zobrazené jednotky:
-                        <label><input type="radio" name="unit" value="kWh" checked />kWh</label>
-                        <label><input type="radio" name="unit" value="kW" />kW</label>
+                        <label><input type=radio name=unit value=kWh checked>kWh</label>
+                        <label><input type=radio name=unit value=kW>kW</label>
                     </div>
                     <div>
                         Zobrazit časové jednotky:
-                        <label><input type="radio" name="group" value="15m" />15 minut</label>
-                        <label><input type="radio" name="group" value="1h" />1 hodina</label>
-                        <label><input type="radio" name="group" value="1d" checked />1 den</label>
-                        <label><input type="radio" name="group" value="1m" />1 měsíc</label>
+                        <label><input type=radio name=group value=15m>15 minut</label>
+                        <label><input type=radio name=group value=1h>1 hodina</label>
+                        <label><input type=radio name=group value=1d checked>1 den</label>
+                        <label><input type=radio name=group value=1m>1 měsíc</label>
                     </div>
                     <div>
-                        <input
-                            type="button"
-                            id="download"
-                            value="Stáhnout vyfiltrovaný CSV (časový úsek, skrytí zvolených odběratelů)"
-                            title="Stáhne nový CSV soubor pro zvolený časový úsek a pouze se zvolenými odběrateli. Výrobní zdroje budou nahrazeny za jeden virtuální zdroj, aby se soubor choval jako platný EDC report."
-                        />
+                        <input type=button id=download value="Stáhnout vyfiltrovaný CSV (časový úsek, skrytí zvolených odběratelů)" title="Stáhne nový CSV soubor pro zvolený časový úsek a pouze se zvolenými odběrateli. Výrobní zdroje budou nahrazeny za jeden virtuální zdroj, aby se soubor choval jako platný EDC report.">
                     </div>
-                    <div id="minFilterParent" style="display: none">
+                    <div id=minFilterParent style=display:none>
                         <label>
                             Skrýt intervaly se sdílením menším než:
-                            <span id="minFilter"></span>
-                            <input
-                                type="range"
-                                min="0"
-                                max="100"
-                                value="99"
-                                id="filterSlider"
-                                style="direction: rtl"
-                            />
-                            <span id="maxFilter"></span>
+                            <span id=minFilter></span>
+                            <input type=range min=0 max=100 value=99 id=filterSlider style=direction:rtl>
+                            <span id=maxFilter></span>
                         </label>
-                        Aktuální nastavení: <span id="thresholdFilter"></span>
+                        Aktuální nastavení: <span id=thresholdFilter></span>
                     </div>
-                    <div id="range"></div>
+                    <div id=range></div>
                 </div>
             </details>
 
             <details open>
                 <summary><h2>Informace o nahraném souboru</h2></summary>
-                <table id="csvMeta">
+                <table id=csvMeta>
                     <tbody>
                         <tr>
                             <th>Jméno souboru:</th>
-                            <td id="filename"></td>
+                            <td id=filename></td>
                         </tr>
                         <tr>
                             <th>Interval od:</th>
-                            <td id="intervalFrom"></td>
+                            <td id=intervalFrom></td>
                         </tr>
                         <tr>
                             <th>Interval do:</th>
-                            <td id="intervalTo"></td>
+                            <td id=intervalTo></td>
                         </tr>
                         <tr>
                             <th>Délka intervalu:</th>
-                            <td id="intervalLength"></td>
+                            <td id=intervalLength></td>
                         </tr>
                         <tr>
                             <th>Aktuálně zobrazená délka:</th>
-                            <td id="intervalFilteredLength"></td>
+                            <td id=intervalFilteredLength></td>
                         </tr>
                     </tbody>
                 </table>
@@ -108,19 +86,19 @@
 
             <details open>
                 <summary><h2>Souhrnné informace</h2></summary>
-                <input type="button" id="showAll" value="Zobrazit vše" />
-                <input type="button" id="showNone" value="Skrýt vše" />
-                <table id="csv">
+                <input type=button id=showAll value="Zobrazit vše">
+                <input type=button id=showNone value="Skrýt vše">
+                <table id=csv>
                     <thead>
                         <tr>
                             <th></th>
-                            <th class="distributionHeader">Výrobní zdroje</th>
-                            <td class="split"></td>
-                            <th class="consumerHeader">Odběratelé</th>
+                            <th class=distributionHeader>Výrobní zdroje</th>
+                            <td class=split></td>
+                            <th class=consumerHeader>Odběratelé</th>
                         </tr>
-                        <tr class="csvHeaderRow"></tr>
+                        <tr class=csvHeaderRow></tr>
                     </thead>
-                    <tbody id="csvBody"></tbody>
+                    <tbody id=csvBody></tbody>
                 </table>
                 <div>
                     "Ušlá příležitost" je odhad kolik energie se nenasdílelo kvůli špatně nastaveným alokačním
@@ -155,9 +133,7 @@
                             <li>Funkce je výpočetně náročná, a může trvat až několik minut.</li>
                             <li>
                                 Samozřejmě že nejlepší koeficienty pro minulost nemusí být nejlepší v
-                                budoucnosti (<a href="https://en.wikipedia.org/wiki/Backtesting"
-                                    >backtesting</a
-                                >). Nalezené alokační klíče nemusí fungovat dobře pokud se změní chování
+                                budoucnosti (<a href=https://en.wikipedia.org/wiki/Backtesting>backtesting</a>). Nalezené alokační klíče nemusí fungovat dobře pokud se změní chování
                                 výroby/spotřeby.
                             </li>
                         </ul>
@@ -168,53 +144,29 @@
                 </ol>
                 <p></p>
                 <div>
-                    <label
-                        title="Kolik opakování používá skupina sdílení. Typicky 5 pro skupiny do 11 EAN a 1 pro větší skupiny."
-                    >
-                        Počet opakování ve skupině sdílení v EDC:<input
-                            id="rounds"
-                            type="number"
-                            min="1"
-                            max="100"
-                            value="5"
-                        />
+                    <label title="Kolik opakování používá skupina sdílení. Typicky 5 pro skupiny do 11 EAN a 1 pro větší skupiny.">
+                        Počet opakování ve skupině sdílení v EDC:<input id=rounds type=number min=1 max=100 value=5>
                     </label>
                 </div>
                 <div>
                     Nastavení optimalizačního algoritmu:
-                    <label
-                        title="Po kolika neúspěšných pokusech algoritmus vzdá hledání. Vyšší čísla dávají lepší výsledky, ale trvají déle."
-                    >
-                        &nbsp;&nbsp;&nbsp;Pokusů v jedné iteraci:<input
-                            id="maxFails"
-                            type="number"
-                            min="1"
-                            max="1000000"
-                            value="200"
-                        />
+                    <label title="Po kolika neúspěšných pokusech algoritmus vzdá hledání. Vyšší čísla dávají lepší výsledky, ale trvají déle.">
+                        &nbsp;&nbsp;&nbsp;Pokusů v jedné iteraci:<input id=maxFails type=number min=1 max=1000000 value=200>
                     </label>
-                    <label
-                        title="Kolikrát spustit algoritmus. Vyšší čísla dávají lepší výsledky, ale trvají déle."
-                    >
-                        Počet iterací:<input id="restarts" type="number" min="1" max="1000" value="20" />
+                    <label title="Kolikrát spustit algoritmus. Vyšší čísla dávají lepší výsledky, ale trvají déle.">
+                        Počet iterací:<input id=restarts type=number min=1 max=1000 value=20>
                     </label>
-                    <span style="display: none">
+                    <span style=display:none>
                         Method:
                         <label>
-                            <input
-                                id="stochastic"
-                                type="radio"
-                                name="method"
-                                value="stochastic"
-                                checked
-                            />Stochastická
+                            <input id=stochastic type=radio name=method value=stochastic checked>Stochastická
                         </label>
-                        <label><input type="radio" name="method" value="gradient" />Gradient descend</label>
+                        <label><input type=radio name=method value=gradient>Gradient descend</label>
                     </span>
                 </div>
-                <table id="computation">
+                <table id=computation>
                     <thead>
-                        <tr class="csvHeaderRow"></tr>
+                        <tr class=csvHeaderRow></tr>
                     </thead>
                     <tbody></tbody>
                 </table>
@@ -222,38 +174,38 @@
 
             <details open>
                 <summary><h2>Sdílení po časových úsecích</h2></summary>
-                <div id="intervalsContainer">
+                <div id=intervalsContainer>
                     <div>
                         <label>
-                            <input type="checkbox" id="groupGraph" checked />Sloučit všechny EANy v grafu
+                            <input type=checkbox id=groupGraph checked>Sloučit všechny EANy v grafu
                         </label>
                         &nbsp;&nbsp;&nbsp;V grafu zobrazit:
                         <label>
-                            <input type="radio" name="graphNonShared" value="produce" checked />výrobu
+                            <input type=radio name=graphNonShared value=produce checked>výrobu
                         </label>
-                        <label><input type="radio" name="graphNonShared" value="consume" />spotřebu</label>
+                        <label><input type=radio name=graphNonShared value=consume>spotřebu</label>
                     </div>
-                    <div id="intervalsGraph"></div>
+                    <div id=intervalsGraph></div>
 
-                    <table id="intervals">
+                    <table id=intervals>
                         <thead>
                             <tr>
                                 <th></th>
-                                <th class="distributionHeader">Výrobní zdroje</th>
-                                <td class="split"></td>
-                                <th class="consumerHeader">Odběratelé</th>
+                                <th class=distributionHeader>Výrobní zdroje</th>
+                                <td class=split></td>
+                                <th class=consumerHeader>Odběratelé</th>
                             </tr>
-                            <tr class="csvHeaderRow"></tr>
+                            <tr class=csvHeaderRow></tr>
                         </thead>
-                        <tbody id="csvBody"></tbody>
+                        <tbody id=csvBody></tbody>
                     </table>
                 </div>
             </details>
 
             <details closed>
                 <summary><h2>Průměrný den</h2></summary>
-                <div id="dailyAverageGraph"></div>
+                <div id=dailyAverageGraph></div>
             </details>
         </div>
-    </body>
-</html>
+    
+

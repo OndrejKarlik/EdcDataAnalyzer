@@ -6,9 +6,9 @@
     "scripts": {
         "@comment1": "no-scope-hoist is a workaround to bug in parcel making the code fail in run time.",
         "@comment2": "HMR fails when --log-level verbose is used, so 'info' is used as a workaround",
-        "@comment3": "tsc is invoked only to fail the build if there is an error in types. Parsec does not need it",
-        "build": "tsc --build . --noEmit && npx parcel build --log-level verbose --dist-dir dist --no-scope-hoist --no-content-hash --public-url ./",
-        "start": "                          npx parcel       --log-level info    --dist-dir .dev --open",
+        "@comment3": "tsc is invoked only to fail the build if there is an error in types. Parcel does not need it",
+        "build": "tsc --build . --noEmit && npx parcel build --log-level warn    --dist-dir .dist --no-scope-hoist --no-content-hash --public-url ./",
+        "dev": "                            npx parcel       --log-level info    --dist-dir .dev --open",
         "noHmr": "                          npx parcel       --log-level verbose --dist-dir .dev --open --no-hmr"
     },
     "devDependencies": {
@@ -16,7 +16,7 @@
         "parcel": "^2.14.1"
     },
     "dependencies": {
-        "chart.js": "^4.4.8",
+        "chart.js": "^4.5.0",
         "nouislider": "^15.8.1"
     }
 }
