@@ -1,3 +1,4 @@
+/// <reference path="./EdcReportAnalyzer.d.ts">
 /* eslint-disable @typescript-eslint/non-nullable-type-assertion-style */
 /* eslint-disable @typescript-eslint/no-unsafe-type-assertion */
 
